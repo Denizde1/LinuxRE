@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=LinuxRE
+Comment=Linux Recovery Environment
+Exec=konsole -e bash /opt/linuxre/linuxre
+Terminal=false
+StartupNotify=false

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+clear
+echo "=== Auto Chroot ==="
+echo
+echo "Bu özellik henüz geliştirme aşamasında."
+read -n1
