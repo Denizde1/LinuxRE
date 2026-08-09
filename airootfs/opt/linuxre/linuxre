@@ -3,7 +3,7 @@
 while true; do
 clear
 echo "=================================="
-echo "        LinuxRE v1.0"
+echo "        LinuxRE v0.1"
 echo "=================================="
 echo
 echo "1) Disk Tools"
