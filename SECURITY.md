@@ -9,4 +9,4 @@
 
 ## Reporting a Vulnerability
 
-You can open a issue. Just open a issue if you see a vulnerability.
+You can open an issue. Just open a issue if you see a vulnerability.
