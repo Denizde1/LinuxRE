@@ -1,0 +1,9 @@
+#!/bin/bash
+
+for connection in $(nmcli -t -f NAME connection show); do
+    nmcli connection modify "$connection" \
+        ipv4.dns "8.8.8.8" \
+        ipv4.ignore-auto-dns yes
+done
+
+nmcli connection reload

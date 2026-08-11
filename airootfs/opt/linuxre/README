@@ -1,4 +1,4 @@
-LinuxRE v0.1
+LinuxRE v0.2
 Arch-based Recovery Environment
 
 Features:
@@ -8,3 +8,5 @@ Features:
 - Archinstall
 - Network Tools
 - System Information
+- SMART Check
+- NVMe Check

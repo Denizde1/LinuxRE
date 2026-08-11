@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # LinuxRE kullanıcı
-useradd -m -G wheel,audio,video,storage,optical -s /bin/bash linuxre
 
 # Şifre
 echo "linuxre:linuxre" | chpasswd

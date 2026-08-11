@@ -1,0 +1,12 @@
+[Unit]
+Description=Set LinuxRE DNS
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/linuxre-dns
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

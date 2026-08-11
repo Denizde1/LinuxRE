@@ -1,30 +1,33 @@
 #!/bin/bash
 
 while true; do
-clear
-echo "=================================="
-echo "        LinuxRE v0.1"
-echo "=================================="
-echo
-echo "1) Disk Tools"
-echo "2) Recovery"
-echo "3) Installation"
-echo "4) Network"
-echo "5) System"
-echo "6) Shell"
-echo "0) Exit"
-echo
 
-read -rp "Choice: " c
 
-case "$c" in
-1) bash /opt/linuxre/tools/disk.sh ;;
-2) bash /opt/linuxre/tools/recovery.sh ;;
-3) bash /opt/linuxre/tools/install.sh ;;
-4) bash /opt/linuxre/tools/network.sh ;;
-5) bash /opt/linuxre/tools/system.sh ;;
-6) exec bash ;;
-0) exit ;;
-*) ;;
-esac
+    echo "╔══════════════════════════════════════════╗"
+    echo "║              LinuxRE v0.2                ║"
+    echo "║        Linux Recovery Environment        ║"
+    echo "╚══════════════════════════════════════════╝"
+    echo
+    echo "  1) Disk Tools"
+    echo "  2) Recovery"
+    echo "  3) Installation"
+    echo "  4) Network"
+    echo "  5) System Diagnostics"
+    echo "  6) Terminal"
+    echo
+    echo "  0) Power Off"
+    echo
+
+    read -rp "Select an option: " c
+
+    case "$c" in
+        1) bash /opt/linuxre/tools/disk.sh ;;
+        2) bash /opt/linuxre/tools/recovery.sh ;;
+        3) bash /opt/linuxre/tools/install.sh ;;
+        4) bash /opt/linuxre/tools/network.sh ;;
+        5) bash /opt/linuxre/tools/system.sh ;;
+        6) clear; bash ;;
+        0) clear; sudo shutdown now ;;
+        *) echo "Invalid option."; sleep 1 ;;
+    esac
 done
