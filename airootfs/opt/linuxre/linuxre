@@ -14,6 +14,7 @@ while true; do
     echo "  4) Network"
     echo "  5) System Diagnostics"
     echo "  6) Terminal"
+    echo "  7) Update the Environment"
     echo
     echo "  0) Power Off"
     echo
@@ -27,6 +28,7 @@ while true; do
         4) bash /opt/linuxre/tools/network.sh ;;
         5) bash /opt/linuxre/tools/system.sh ;;
         6) clear; bash ;;
+        7) bash /opt/linuxre/tools/update.sh ;;
         0) clear; sudo shutdown now ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
