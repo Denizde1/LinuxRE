@@ -1,0 +1,14 @@
+[Unit]
+Description=LinuxRE Time Synchronization
+After=NetworkManager-wait-online.service network-online.target
+Wants=NetworkManager-wait-online.service network-online.target
+Before=archinstall.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/systemd/systemd-timesyncd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

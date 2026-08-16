@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-clear
-echo "=== Boot Repair ==="
-echo
-echo "Bu özellik henüz geliştirme aşamasında."
-read -n1

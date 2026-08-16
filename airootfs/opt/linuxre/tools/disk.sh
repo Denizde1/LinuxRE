@@ -15,6 +15,7 @@ while true; do
     echo "  6) parted"
     echo "  7) Disk Health (SMART)"
     echo "  8) NVMe Information"
+    echo "  9) Mount Manager"
     echo
     echo "  0) Back"
     echo
@@ -46,6 +47,8 @@ while true; do
             fi
             read -rp "Press Enter to continue..." _
             ;;
+
+        9) bash /opt/linuxre/tools/mountmanager.sh ;;    
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

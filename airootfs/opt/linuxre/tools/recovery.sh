@@ -14,6 +14,8 @@ while true; do
     echo "  5) SMART / Disk Health"
     echo "  6) ddrescue"
     echo "  7) File System Tools"
+    echo "  8) Filesystem Check"
+    echo "  9) System Repair (For systemd-boot)"
     echo
     echo "  0) Back"
     echo
@@ -23,15 +25,7 @@ while true; do
     case "$c" in
         1)
             clear
-            echo "Arch Chroot"
-            echo "────────────────────────────"
-            echo
-            echo "Mount your Linux installation first:"
-            echo
-            echo "  mount /dev/sdXY /mnt"
-            echo "  arch-chroot /mnt"
-            echo
-            read -rp "Press Enter to continue..." _
+            sudo bash /opt/linuxre/scripts/auto-chroot.sh
             ;;
         2)
             clear
@@ -76,6 +70,9 @@ while true; do
             echo
             read -rp "Press Enter to continue..." _
             ;;
+
+        8) sudo bash /opt/linuxre/tools/fsck.sh ;;
+        9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
