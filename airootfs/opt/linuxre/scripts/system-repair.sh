@@ -49,6 +49,9 @@ for cmd in \
     awk \
     sed \
     find \
+    sort \
+    head \
+    mapfile \
     arch-chroot
 do
     if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -214,17 +217,39 @@ find_initramfs() {
 # --------------------------------------------------
 
 find_uki() {
+
     local uki_dir="$MNT$ESP_MOUNT/EFI/Linux"
 
     [[ -d "$uki_dir" ]] || return 1
 
-    find "$uki_dir"         -maxdepth 1         -type f         -iname '*.efi'         -printf '%f\n' |
+    find "$uki_dir" \
+        -maxdepth 1 \
+        -type f \
+        -iname '*.efi' \
+        -printf '%f\n' |
+        sort
+}
+
+get_uki_files() {
+
+    local uki_dir="$MNT$ESP_MOUNT/EFI/Linux"
+
+    [[ -d "$uki_dir" ]] || return 0
+
+    find "$uki_dir" \
+        -maxdepth 1 \
+        -type f \
+        -iname '*.efi' \
+        -printf '%f\n' |
         sort
 }
 
 has_uki() {
+
     local uki
+
     uki="$(find_uki | head -n1)"
+
     [[ -n "$uki" ]]
 }
 
@@ -278,6 +303,8 @@ diagnose_system() {
 
     if find_initramfs "initramfs-linux.img"; then
         echo "[OK] Main initramfs detected."
+    elif has_uki; then
+        echo "[OK] Main initramfs embedded in UKI."
     else
         echo "[FAIL] Main initramfs not found."
     fi
@@ -292,15 +319,20 @@ diagnose_system() {
     echo "Unified Kernel Images:"
     echo
 
-    mapfile -t diagnosis_uki_files < <(find_uki)
+    mapfile -t diagnosis_uki_files < <(get_uki_files)
 
     if (( ${#diagnosis_uki_files[@]} > 0 )); then
+
         uki_found=1
+
         for uki in "${diagnosis_uki_files[@]}"; do
             echo "[OK] UKI detected: /EFI/Linux/$uki"
         done
+
     else
+
         echo "[INFO] No Unified Kernel Image detected."
+
     fi
 
     echo
@@ -354,10 +386,11 @@ diagnose_system() {
 # --------------------------------------------------
 
 repair_kernel_initramfs() {
+
     local _repair_cleanup_done=0
+
     trap 'if (( _repair_cleanup_done == 0 )); then cleanup; fi' RETURN
 
-    # Prepare the target system using shared LinuxRE helpers.
     if ! prepare_target; then
         warn "Failed to prepare target system."
         return 1
@@ -392,7 +425,7 @@ repair_kernel_initramfs() {
         linux-hardened
     do
 
-        if arch-chroot "$MNT" pacman -Q "$package" >/dev/null 2>&1; then
+        if linuxre_chroot "$MNT" pacman -Q "$package" >/dev/null 2>&1; then
             kernel_package="$package"
             break
         fi
@@ -442,7 +475,7 @@ repair_kernel_initramfs() {
         echo
         echo "[+] Reinstalling $kernel_package..."
 
-        if ! arch-chroot "$MNT" pacman -S --noconfirm "$kernel_package"; then
+        if ! linuxre_chroot "$MNT" pacman -S --noconfirm "$kernel_package"; then
             echo "[FAIL] Kernel package installation failed."
             return 1
         fi
@@ -458,7 +491,7 @@ repair_kernel_initramfs() {
     echo
     echo "[+] Regenerating initramfs..."
 
-    if ! arch-chroot "$MNT" mkinitcpio -P; then
+    if ! linuxre_chroot "$MNT" mkinitcpio -P; then
         echo
         echo "[FAIL] mkinitcpio failed."
         return 1
@@ -478,20 +511,24 @@ repair_kernel_initramfs() {
         return 1
     fi
 
-    if ! find_initramfs "initramfs-linux.img"; then
+    if ! (find_initramfs "initramfs-linux.img" || has_uki); then
         echo "[FAIL] Main initramfs is still missing."
         return 1
     fi
 
     echo "[OK] Kernel: /$kernel"
-    echo "[OK] Initramfs: /initramfs-linux.img"
+
+    if has_uki; then
+        echo "[OK] Initramfs: embedded in UKI"
+    else
+        echo "[OK] Initramfs: /initramfs-linux.img"
+    fi
 
     echo
     echo "Kernel and initramfs repair completed."
 
     trap - RETURN
     cleanup
-
 }
 
 # --------------------------------------------------
@@ -499,10 +536,11 @@ repair_kernel_initramfs() {
 # --------------------------------------------------
 
 repair_systemd() {
+
     local _repair_cleanup_done=0
+
     trap 'if (( _repair_cleanup_done == 0 )); then cleanup; fi' RETURN
 
-    # Prepare the target system using shared LinuxRE helpers.
     if ! prepare_target; then
         warn "Failed to prepare target system."
         return 1
@@ -513,7 +551,6 @@ repair_systemd() {
         cleanup
         return 1
     fi
-
 
     clear
 
@@ -548,10 +585,10 @@ repair_systemd() {
     # Check package
     # --------------------------------------------------
 
-    if arch-chroot "$MNT" pacman -Q systemd >/dev/null 2>&1; then
+    if linuxre_chroot "$MNT" pacman -Q systemd >/dev/null 2>&1; then
 
         systemd_package="$(
-            arch-chroot "$MNT" pacman -Q systemd
+            linuxre_chroot "$MNT" pacman -Q systemd
         )"
 
         echo "[OK] systemd package installed:"
@@ -596,7 +633,7 @@ repair_systemd() {
     echo
     echo "[+] Verifying systemd package files..."
 
-    if arch-chroot "$MNT" pacman -Qk systemd >/dev/null 2>&1; then
+    if linuxre_chroot "$MNT" pacman -Qk systemd >/dev/null 2>&1; then
 
         echo "[OK] systemd package verification passed."
 
@@ -643,7 +680,7 @@ repair_systemd() {
     echo "[+] Reinstalling systemd..."
     echo
 
-    if ! arch-chroot "$MNT" pacman -S --noconfirm systemd; then
+    if ! linuxre_chroot "$MNT" pacman -S --noconfirm systemd; then
 
         echo
         echo "[FAIL] systemd reinstallation failed."
@@ -672,7 +709,7 @@ repair_systemd() {
 
     fi
 
-    if ! arch-chroot "$MNT" pacman -Qk systemd >/dev/null 2>&1; then
+    if ! linuxre_chroot "$MNT" pacman -Qk systemd >/dev/null 2>&1; then
 
         echo "[WARN] systemd package verification still reports problems."
 
@@ -699,10 +736,11 @@ repair_systemd() {
 # --------------------------------------------------
 
 repair_systemd_boot() {
+
     local _repair_cleanup_done=0
+
     trap 'if (( _repair_cleanup_done == 0 )); then cleanup; fi' RETURN
 
-    # Prepare the target system using shared LinuxRE helpers.
     if ! prepare_target; then
         warn "Failed to prepare target system."
         return 1
@@ -713,7 +751,6 @@ repair_systemd_boot() {
         cleanup
         return 1
     fi
-
 
     clear
 
@@ -765,7 +802,7 @@ repair_systemd_boot() {
     echo "[+] Checking existing systemd-boot installation..."
     echo
 
-    if arch-chroot "$MNT" bootctl is-installed >/dev/null 2>&1; then
+    if linuxre_chroot "$MNT" bootctl is-installed >/dev/null 2>&1; then
         echo "[OK] systemd-boot is currently installed."
     else
         echo "[WARN] systemd-boot is not currently installed."
@@ -803,7 +840,7 @@ repair_systemd_boot() {
     echo
     echo "[+] Installing systemd-boot..."
 
-    if ! arch-chroot "$MNT" bootctl install; then
+    if ! linuxre_chroot "$MNT" bootctl install; then
 
         echo
         echo "[FAIL] systemd-boot installation failed."
@@ -841,7 +878,7 @@ EOF
     echo "[OK] loader.conf created."
 
     # --------------------------------------------------
-    # Detect kernel
+    # Detect boot images
     # --------------------------------------------------
 
     local kernel=""
@@ -852,7 +889,13 @@ EOF
     echo
     echo "[+] Detecting boot images..."
 
+    # --------------------------------------------------
+    # Detect kernel + separate initramfs
+    # --------------------------------------------------
+
     if kernel="$(find_kernel)"; then
+
+        echo "[+] Kernel found: /$kernel"
 
         initramfs="initramfs-linux.img"
 
@@ -863,20 +906,12 @@ EOF
     fi
 
     # --------------------------------------------------
-    # Detect UKI
+    # Detect existing UKI
     # --------------------------------------------------
 
-    if [[ -z "$boot_type" &&
-          -d "$MNT$ESP_MOUNT/EFI/Linux" ]]; then
+    if [[ -z "$boot_type" ]]; then
 
-        mapfile -t uki_files < <(
-            find "$MNT$ESP_MOUNT/EFI/Linux" \
-                -maxdepth 1 \
-                -type f \
-                -iname '*.efi' \
-                -printf '%f\n' |
-            sort
-        )
+        mapfile -t uki_files < <(get_uki_files)
 
         if (( ${#uki_files[@]} == 1 )); then
 
@@ -890,9 +925,11 @@ EOF
             echo
 
             for i in "${!uki_files[@]}"; do
+
                 printf "  %d) %s\n" \
                     "$((i + 1))" \
                     "${uki_files[$i]}"
+
             done
 
             echo
@@ -911,7 +948,7 @@ EOF
             else
 
                 echo "[FAIL] Invalid UKI selection."
-                        return 1
+                return 1
 
             fi
 
@@ -934,26 +971,83 @@ EOF
             echo "[FAIL] No Linux kernel image was found."
             echo
             echo "Use 'Repair kernel and initramfs' first."
-                return 1
+            return 1
 
         fi
 
         echo "[+] Kernel found: /$kernel"
-        echo "[+] Rebuilding initramfs..."
+        echo "[+] Rebuilding initramfs/UKI..."
 
-        if ! arch-chroot "$MNT" mkinitcpio -P; then
+        if ! linuxre_chroot "$MNT" mkinitcpio -P; then
 
             echo
             echo "[FAIL] mkinitcpio failed."
-                return 1
+            return 1
 
         fi
 
-        echo "[OK] initramfs regeneration completed."
+        echo "[OK] initramfs/UKI regeneration completed."
 
-        if [[ -f "$MNT$ESP_MOUNT/initramfs-linux.img" ]]; then
+        # --------------------------------------------------
+        # IMPORTANT:
+        # Re-detect the boot image after mkinitcpio.
+        #
+        # mkinitcpio may generate a UKI instead of a
+        # standalone initramfs.
+        # --------------------------------------------------
+
+        echo
+        echo "[+] Re-detecting boot images..."
+
+        mapfile -t uki_files < <(get_uki_files)
+
+        if (( ${#uki_files[@]} == 1 )); then
+
+            uki="${uki_files[0]}"
+            boot_type="uki"
+
+            echo "[OK] Regenerated UKI detected:"
+            echo "     /EFI/Linux/$uki"
+
+        elif (( ${#uki_files[@]} > 1 )); then
+
+            echo "[WARN] Multiple UKIs were generated."
+
+            for i in "${!uki_files[@]}"; do
+
+                printf "  %d) %s\n" \
+                    "$((i + 1))" \
+                    "${uki_files[$i]}"
+
+            done
+
+            echo
+
+            read -rp \
+                "Select UKI [1-${#uki_files[@]}]: " \
+                uki_choice
+
+            if [[ "$uki_choice" =~ ^[0-9]+$ ]] &&
+               (( uki_choice >= 1 &&
+                  uki_choice <= ${#uki_files[@]} )); then
+
+                uki="${uki_files[$((uki_choice - 1))]}"
+                boot_type="uki"
+
+            else
+
+                echo "[FAIL] Invalid UKI selection."
+                return 1
+
+            fi
+
+        elif [[ -f "$MNT$ESP_MOUNT/initramfs-linux.img" ]]; then
+
             initramfs="initramfs-linux.img"
             boot_type="kernel"
+
+            echo "[OK] Standalone initramfs detected."
+
         fi
 
     fi
@@ -985,7 +1079,7 @@ EOF
 
             echo
             echo "[FAIL] No usable boot image was found."
-                return 1
+            return 1
 
             ;;
 
@@ -1026,16 +1120,20 @@ EOF
     echo "[OK] arch.conf created."
 
     # --------------------------------------------------
-    # Verify files
+    # Verify systemd-boot
     # --------------------------------------------------
 
     echo
     echo "[+] Verifying systemd-boot installation..."
 
-    if ! arch-chroot "$MNT" bootctl status; then
+    if ! linuxre_chroot "$MNT" bootctl status; then
         echo
         echo "[WARN] bootctl status reported an issue."
     fi
+
+    # --------------------------------------------------
+    # Verify loader files
+    # --------------------------------------------------
 
     echo
     echo "[+] Verifying loader files..."
@@ -1053,25 +1151,39 @@ EOF
     echo "[OK] loader.conf verified."
     echo "[OK] arch.conf verified."
 
+    # --------------------------------------------------
+    # Verify actual boot image
+    # --------------------------------------------------
+
     if [[ "$boot_type" == "kernel" ]]; then
 
-        [[ -f "$MNT$ESP_MOUNT/$kernel" ]] ||
+        if [[ ! -f "$MNT$ESP_MOUNT/$kernel" ]]; then
+            echo "[FAIL] Kernel verification failed."
             return 1
+        fi
 
-        [[ -f "$MNT$ESP_MOUNT/$initramfs" ]] ||
+        if [[ ! -f "$MNT$ESP_MOUNT/$initramfs" ]]; then
+            echo "[FAIL] Initramfs verification failed."
             return 1
+        fi
 
         echo "[OK] Kernel verified."
         echo "[OK] Initramfs verified."
 
     else
 
-        [[ -f "$MNT$ESP_MOUNT/EFI/Linux/$uki" ]] ||
+        if [[ ! -f "$MNT$ESP_MOUNT/EFI/Linux/$uki" ]]; then
+            echo "[FAIL] UKI verification failed."
             return 1
+        fi
 
         echo "[OK] UKI verified."
 
     fi
+
+    # --------------------------------------------------
+    # Final success
+    # --------------------------------------------------
 
     echo
     echo "╔══════════════════════════════════════════╗"
@@ -1090,6 +1202,7 @@ EOF
 # --------------------------------------------------
 
 run_tool() {
+
     "$@"
     local status=$?
 
@@ -1114,15 +1227,15 @@ while true; do
     echo
 
     echo "Target:"
-    echo "  OS       : $PRETTY_NAME"
-    echo "  Root     : $ROOT_DEV"
+    echo "  OS        : $PRETTY_NAME"
+    echo "  Root      : $ROOT_DEV"
     echo "  Filesystem: $ROOT_FSTYPE"
 
     [[ -n "$ROOT_SUBVOL" ]] &&
-        echo "  Subvolume: $ROOT_SUBVOL"
+        echo "  Subvolume : $ROOT_SUBVOL"
 
-    echo "  ESP      : $ESP_DEV"
-    echo "  ESP mount: $ESP_MOUNT"
+    echo "  ESP       : $ESP_DEV"
+    echo "  ESP mount : $ESP_MOUNT"
 
     echo
     echo "────────────────────────────────────────────"
@@ -1164,7 +1277,7 @@ while true; do
 
         *)
             echo
-            echo "Invalid option."
+            echo "Invalid selection."
             sleep 2
             ;;
 
