@@ -15,7 +15,6 @@ while true; do
     echo "  6) ddrescue"
     echo "  7) File System Tools"
     echo "  8) Filesystem Check"
-    echo "  9) System Repair (For systemd-boot)"
     echo
     echo "  0) Back"
     echo
@@ -25,7 +24,72 @@ while true; do
     case "$c" in
         1)
             clear
-            sudo bash /opt/linuxre/scripts/auto-chroot.sh
+
+            # Arch Chroot
+            # shellcheck disable=SC1091
+            source /opt/linuxre/lib/common.sh
+            # shellcheck disable=SC1091
+            source /opt/linuxre/lib/target.sh
+            # shellcheck disable=SC1091
+            source /opt/linuxre/lib/chroot.sh
+
+            if ! sudo -v; then
+                read -rp "Press Enter to continue..." _
+                continue
+            fi
+
+            sudo bash -c '
+                source /opt/linuxre/lib/common.sh
+                source /opt/linuxre/lib/target.sh
+                source /opt/linuxre/lib/chroot.sh
+
+                require_root || exit 1
+
+                if ! detect_root_filesystems; then
+                    warn "No supported Linux root filesystems were found."
+                    exit 1
+                fi
+
+                echo
+                echo "Detected root filesystems:"
+                echo
+
+                for i in "${!ROOTS[@]}"; do
+                    dev="${ROOTS[$i]}"
+
+                    echo "[$((i + 1))] $dev"
+
+                    lsblk -no SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$dev" |
+                        sed "s/^/    /"
+
+                    echo
+                done
+
+                while true; do
+                    read -rp "Select Arch Linux root filesystem [1-${#ROOTS[@]}]: " choice
+
+                    if [[ "$choice" =~ ^[0-9]+$ ]] &&
+                       (( choice >= 1 && choice <= ${#ROOTS[@]} )); then
+                        break
+                    fi
+
+                    echo "Invalid selection."
+                done
+
+                ROOT_DEV="${ROOTS[$((choice - 1))]}"
+
+                set_root "$ROOT_DEV" || exit 1
+
+                if [[ "$ROOT_FSTYPE" == "btrfs" ]]; then
+                    detect_btrfs_subvolume || exit 1
+                fi
+
+                prepare_target || exit 1
+
+                enter_chroot
+            '
+
+            read -rp "Press Enter to continue..."
             ;;
         2)
             clear
@@ -72,7 +136,6 @@ while true; do
             ;;
 
         8) sudo bash /opt/linuxre/tools/fsck.sh ;;
-        9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
