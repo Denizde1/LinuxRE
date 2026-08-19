@@ -16,6 +16,7 @@ while true; do
     echo "  7) Disk Health (SMART)"
     echo "  8) NVMe Information"
     echo "  9) Mount Manager"
+    echo "  10) System Image Recovery"
     echo
     echo "  0) Back"
     echo
@@ -48,7 +49,8 @@ while true; do
             read -rp "Press Enter to continue..." _
             ;;
 
-        9) bash /opt/linuxre/tools/mountmanager.sh ;;    
+        9) bash /opt/linuxre/tools/mountmanager.sh ;; 
+        10) bash /opt/linuxre/tools/disk-imaging.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

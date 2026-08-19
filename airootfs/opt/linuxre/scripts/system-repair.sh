@@ -189,129 +189,6 @@ diagnose() {
 }
 
 # ==================================================
-# Automatic repair
-# ==================================================
-
-automatic_repair() {
-    local repair_failed=0
-    local final_failed=0
-
-    clear
-
-    echo "╔══════════════════════════════════════════╗"
-    echo "║          LinuxRE Automatic Repair        ║"
-    echo "╚══════════════════════════════════════════╝"
-    echo
-
-    show_target
-
-    echo "Automatic repair will:"
-    echo
-    echo "  • Diagnose the target system"
-    echo "  • Repair only failed components"
-    echo "  • Run a final diagnosis"
-    echo
-
-    read -rp "Continue? [y/N]: " confirm
-
-    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo
-        echo "Cancelled."
-        read -rp "Press Enter..."
-        return 0
-    fi
-
-    echo
-    echo "========================================"
-    echo "          Initial Diagnosis"
-    echo "========================================"
-    echo
-
-    # --------------------------------------------------
-    # Kernel
-    # --------------------------------------------------
-
-    if ! verify_kernel >/dev/null 2>&1; then
-        log "Kernel check failed. Repairing kernel..."
-        if ! repair_kernel; then
-            repair_failed=1
-        fi
-    else
-        ok "Kernel check passed. No kernel repair needed."
-    fi
-
-    # --------------------------------------------------
-    # Initramfs / UKI
-    # --------------------------------------------------
-
-    if ! verify_initramfs >/dev/null 2>&1; then
-        log "Initramfs / UKI check failed. Repairing..."
-        if ! repair_initramfs; then
-            repair_failed=1
-        fi
-    else
-        ok "Initramfs / UKI check passed. No repair needed."
-    fi
-
-    # --------------------------------------------------
-    # systemd
-    # --------------------------------------------------
-
-    if ! verify_systemd >/dev/null 2>&1; then
-        log "systemd check failed. Repairing systemd..."
-        if ! repair_systemd; then
-            repair_failed=1
-        fi
-    else
-        ok "systemd check passed. No systemd repair needed."
-    fi
-
-    # --------------------------------------------------
-    # systemd-boot
-    # --------------------------------------------------
-
-    if ! verify_systemd_boot >/dev/null 2>&1; then
-        log "systemd-boot check failed. Repairing systemd-boot..."
-        if ! repair_systemd_boot; then
-            repair_failed=1
-        fi
-    else
-        ok "systemd-boot check passed. No repair needed."
-    fi
-
-    # --------------------------------------------------
-    # Final diagnosis
-    # --------------------------------------------------
-
-    echo
-    echo "========================================"
-    echo "          Final Diagnosis"
-    echo "========================================"
-    echo
-
-    verify_target || final_failed=1
-    verify_pacman || final_failed=1
-    verify_kernel || final_failed=1
-    verify_initramfs || final_failed=1
-    verify_systemd || final_failed=1
-    verify_systemd_boot || final_failed=1
-
-    echo
-    echo "────────────────────────────────────────────"
-
-    if (( repair_failed == 0 && final_failed == 0 )); then
-        ok "Automatic repair completed successfully."
-    else
-        warn "Automatic repair completed with errors."
-    fi
-
-    echo
-    read -rp "Press Enter to return to the menu..."
-
-    (( repair_failed == 0 && final_failed == 0 ))
-}
-
-# ==================================================
 # Main menu
 # ==================================================
 
@@ -375,11 +252,12 @@ while true; do
         5)
             repair_systemd_boot
             echo
-            read -rp "Press Enter..."
+            read -rp "Press Enter..." 
             ;;
 
         6)
-            automatic_repair
+            cleanup
+	    bash /opt/linuxre/scripts/automatic-repair.sh
             ;;
 
         7)

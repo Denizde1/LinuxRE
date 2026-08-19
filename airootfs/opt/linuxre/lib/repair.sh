@@ -123,6 +123,95 @@ verify_pacman() {
 }
 
 # ==================================================
+# Package integrity verification
+# ==================================================
+
+verify_package_integrity() {
+
+    log "Checking package integrity..."
+
+    local output
+
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
+        warn "Package integrity check failed."
+        return 1
+    }
+
+    if echo "$output" | grep -qE '[1-9][0-9]* (missing|altered) files'; then
+        warn "Package integrity problems were detected."
+        return 1
+    fi
+
+    ok "Package integrity check completed successfully."
+    return 0
+}
+
+# ==================================================
+# Package integrity repair
+# ==================================================
+
+repair_package_integrity() {
+
+    local output
+    local packages
+    local package
+
+    echo
+    echo "========================================"
+    echo "       Package Integrity Repair"
+    echo "========================================"
+    echo
+
+    log "Checking installed packages..."
+
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
+        warn "Package integrity check failed."
+        return 1
+    }
+
+    packages="$(
+        echo "$output" |
+        awk -F: '/[1-9][0-9]* (missing|altered) files/ {
+            print $1
+        }' |
+        sed 's/[[:space:]]*$//' |
+        sort -u
+    )"
+
+    if [[ -z "$packages" ]]; then
+        ok "No packages require repair."
+        return 0
+    fi
+
+    echo
+    log "Packages requiring repair:"
+
+    while IFS= read -r package; do
+        [[ -z "$package" ]] && continue
+        echo "    $package"
+    done <<< "$packages"
+
+    echo
+
+    while IFS= read -r package; do
+        [[ -z "$package" ]] && continue
+
+        log "Reinstalling $package..."
+
+        if ! linuxre_chroot "$MNT" \
+            pacman -S --noconfirm "$package"; then
+
+            warn "Failed to reinstall $package."
+            return 1
+        fi
+
+        ok "$package repaired."
+    done <<< "$packages"
+
+    return 0
+}
+
+# ==================================================
 # Kernel verification
 # ==================================================
 

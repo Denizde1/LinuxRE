@@ -1,4 +1,4 @@
-LinuxRE v0.4
+LinuxRE v0.5
 Arch-based Recovery Environment
 
 Features:
@@ -10,3 +10,6 @@ Features:
 - System Information
 - SMART Check
 - NVMe Check
+- Automatic Repair
+- Systemd Repair
+- Kernel Repair
