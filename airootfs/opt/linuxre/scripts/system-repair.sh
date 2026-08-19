@@ -218,13 +218,12 @@ while true; do
     echo "  3) Repair initramfs / UKI"
     echo "  4) Repair systemd"
     echo "  5) Repair systemd-boot"
-    echo "  6) Automatic repair"
-    echo "  7) Exit"
+    echo "  6) Exit"
     echo
     echo "────────────────────────────────────────────"
     echo
 
-    read -rp "Select an option [1-7]: " option
+    read -rp "Select an option [1-6]: " option
 
     case "$option" in
         1)
@@ -256,11 +255,6 @@ while true; do
             ;;
 
         6)
-            cleanup
-	    bash /opt/linuxre/scripts/automatic-repair.sh
-            ;;
-
-        7)
             echo
             echo "Exiting System Repair..."
             exit 0
