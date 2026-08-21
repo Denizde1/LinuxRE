@@ -48,7 +48,7 @@ echo "========================================"
 echo "             WARNING!"
 echo "========================================"
 echo
-echo "All existing data on the TARGET device"
+echo "All existing data on the target device"
 echo "will be permanently overwritten."
 echo
 
@@ -79,6 +79,7 @@ echo
 
 if [[ $status -eq 0 ]]; then
     echo "Disk cloned successfully."
+    echo "If you cloned a disk to larger disk, you should extend the partition. You can use GParted, cfdisk etc."
 else
     echo "Cloning finished with errors."
     echo "The map file was preserved:"

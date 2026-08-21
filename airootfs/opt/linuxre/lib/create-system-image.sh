@@ -18,6 +18,7 @@ echo
 lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINTS
 
 echo
+
 read -rp "Source disk or partition (example: /dev/nvme0n1): " source
 read -rp "Destination image path (example: /mnt/backup/system.img): " image
 
@@ -34,6 +35,7 @@ if [[ -z "$image" ]]; then
 fi
 
 map="${image}.map"
+destination_dir="$(dirname "$image")"
 
 echo
 echo "Source : $source"
@@ -41,39 +43,175 @@ echo "Image  : $image"
 echo "Map    : $map"
 echo
 
-read -rp "Start imaging? This may take a long time. [y/N]: " confirm
+if findmnt -rn -S "$source" >/dev/null 2>&1; then
+    echo "WARNING: Source device appears to be mounted."
+    echo
+    findmnt -rn -S "$source"
+    echo
+    read -rp "Continue anyway? [y/N]: " mounted_confirm
 
-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-    echo "Cancelled."
-    exit 0
+    if [[ ! "$mounted_confirm" =~ ^[Yy]$ ]]; then
+        echo "Cancelled."
+        exit 0
+    fi
 fi
 
-mkdir -p "$(dirname "$image")" || {
+if [[ -e "$image" ]]; then
+    echo "WARNING: Destination image already exists."
+    echo
+    read -rp "Overwrite it? [y/N]: " overwrite
+
+    if [[ ! "$overwrite" =~ ^[Yy]$ ]]; then
+        echo "Cancelled."
+        exit 0
+    fi
+fi
+
+if [[ "$source" == "$image" ]]; then
+    echo
+    echo "Error: Source and destination cannot be the same."
+    exit 1
+fi
+
+mkdir -p "$destination_dir" || {
     echo "Error: Could not access destination directory."
     exit 1
 }
 
 echo
-echo "Creating system image..."
+echo "Select imaging mode:"
+echo
+echo "  1) Fast       - First pass only"
+echo "  2) Balanced   - First pass + 3 retries"
+echo "  3) Recovery   - First pass + 5 retries"
+echo "  4) Resume     - Continue using existing map file"
 echo
 
-ddrescue --force --no-scrape "$source" "$image" "$map"
+read -rp "Select mode [1-4]: " mode
 
-status=$?
+case "$mode" in
+    1)
+        echo
+        echo "Mode: Fast"
+        echo "Starting first pass..."
+        echo
+
+        ddrescue --force --no-scrape \
+            "$source" "$image" "$map"
+
+        status=$?
+        ;;
+
+    2)
+        echo
+        echo "Mode: Balanced"
+        echo "Starting first pass..."
+        echo
+
+        ddrescue --force --no-scrape \
+            "$source" "$image" "$map"
+
+        first_status=$?
+
+        echo
+        echo "First pass completed."
+        echo
+
+        read -rp "Retry failed areas 3 times? [Y/n]: " retry_confirm
+
+        if [[ "$retry_confirm" =~ ^[Nn]$ ]]; then
+            status=$first_status
+        else
+            echo
+            echo "Starting recovery pass (-r3)..."
+            echo
+
+            ddrescue --force --retry-passes=3 \
+                "$source" "$image" "$map"
+
+            status=$?
+        fi
+        ;;
+
+    3)
+        echo
+        echo "Mode: Recovery"
+        echo "Starting first pass..."
+        echo
+
+        ddrescue --force --no-scrape \
+            "$source" "$image" "$map"
+
+        first_status=$?
+
+        echo
+        echo "First pass completed."
+        echo
+
+        read -rp "Retry failed areas 5 times? [Y/n]: " retry_confirm
+
+        if [[ "$retry_confirm" =~ ^[Nn]$ ]]; then
+            status=$first_status
+        else
+            echo
+            echo "Starting recovery pass (-r5)..."
+            echo
+
+            ddrescue --force --retry-passes=5 \
+                "$source" "$image" "$map"
+
+            status=$?
+        fi
+        ;;
+
+    4)
+        if [[ ! -f "$map" ]]; then
+            echo
+            echo "Error: No map file exists."
+            echo "Cannot resume without:"
+            echo "$map"
+            exit 1
+        fi
+
+        echo
+        echo "Mode: Resume"
+        echo "Using existing map file:"
+        echo "$map"
+        echo
+
+        ddrescue --force \
+            "$source" "$image" "$map"
+
+        status=$?
+        ;;
+
+    *)
+        echo
+        echo "Error: Invalid mode."
+        exit 1
+        ;;
+esac
 
 echo
 
 if [[ $status -eq 0 ]]; then
-    echo "System image created successfully."
+    echo "========================================"
+    echo "       Imaging completed successfully"
+    echo "========================================"
     echo
     echo "Image: $image"
     echo "Map:   $map"
 else
-    echo "Imaging finished with errors."
+    echo "========================================"
+    echo "       Imaging finished with errors"
+    echo "========================================"
+    echo
     echo "The map file was preserved."
     echo
-    echo "You can resume the operation later using:"
+    echo "You can resume later with:"
     echo "$map"
 fi
+
+echo
 
 exit "$status"

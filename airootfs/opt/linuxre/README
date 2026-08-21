@@ -1,11 +1,11 @@
-LinuxRE v0.5
+LinuxRE v0.5.1
 Arch-based Recovery Environment
 
 Features:
 - KDE Plasma
 - Disk Recovery
 - Chroot
-- Archinstall
+- Archinstall Script
 - Network Tools
 - System Information
 - SMART Check
