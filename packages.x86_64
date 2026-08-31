@@ -106,6 +106,8 @@ wget
 curl
 git
 
+polkit
+
 # Filesystems
 ntfs-3g
 
@@ -114,6 +116,7 @@ gparted
 os-prober
 pciutils
 udisks2
+polkit-kde-agent
 
 # Monitoring
 htop

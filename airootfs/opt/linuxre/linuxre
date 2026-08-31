@@ -4,7 +4,7 @@ while true; do
 
 
     echo "╔══════════════════════════════════════════╗"
-    echo "║              LinuxRE v0.5.1              ║"
+    echo "║               LinuxRE v0.6               ║"
     echo "║        Linux Recovery Environment        ║"
     echo "╚══════════════════════════════════════════╝"
     echo
@@ -30,7 +30,7 @@ while true; do
         5) bash /opt/linuxre/tools/system.sh ;;
         6) clear; bash ;;
         7) bash /opt/linuxre/tools/update.sh ;;
-        8) bash /opt/linuxre/scripts/automatic-repair.sh ;;
+        8) sudo bash /opt/linuxre/scripts/automatic-repair.sh ;;
         0) clear; sudo shutdown now ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

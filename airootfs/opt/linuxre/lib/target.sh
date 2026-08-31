@@ -13,7 +13,6 @@ ROOT_DEV=""
 ROOT_UUID=""
 ROOT_FSTYPE=""
 ROOT_SUBVOL=""
-
 ESP_DEV=""
 ESP_UUID=""
 ESP_FSTYPE=""
@@ -103,26 +102,45 @@ detect_btrfs_subvolume() {
 
     ROOT_SUBVOL=""
 
-    while IFS= read -r subvol; do
-        [[ -n "$subvol" ]] || continue
+    # --------------------------------------------------
+    # Check top-level subvolume (ID 5)
+    # --------------------------------------------------
 
-        if [[ -f "$TMP/$subvol/etc/os-release" ]]; then
-            ROOT_SUBVOL="$subvol"
-            break
-        fi
-    done < <(
-        btrfs subvolume list "$TMP" |
-            sed -n 's/.* path //p'
-    )
+    # The top-level Btrfs subvolume has ID 5 and is not
+    # normally listed by `btrfs subvolume list`.
+
+    if [[ -f "$TMP/etc/os-release" ]]; then
+        ROOT_SUBVOL="5"
+    else
+        # --------------------------------------------------
+        # Check child subvolumes
+        # --------------------------------------------------
+
+        while IFS= read -r subvol; do
+            [[ -n "$subvol" ]] || continue
+
+            if [[ -f "$TMP/$subvol/etc/os-release" ]]; then
+                ROOT_SUBVOL="$subvol"
+                break
+            fi
+        done < <(
+            btrfs subvolume list "$TMP" |
+                sed -n 's/.* path //p'
+        )
+    fi
 
     umount "$TMP" 2>/dev/null || true
 
     if [[ -z "$ROOT_SUBVOL" ]]; then
-        warn "Unable to find the Linux root subvolume."
+        warn "Unable to determine Btrfs root subvolume."
         return 1
     fi
 
-    log "Btrfs root subvolume: $ROOT_SUBVOL"
+    if [[ "$ROOT_SUBVOL" == "5" ]]; then
+        log "Btrfs root: top-level subvolume (ID 5)"
+    else
+        log "Btrfs root subvolume: $ROOT_SUBVOL"
+    fi
 
     return 0
 }
@@ -145,14 +163,38 @@ mount_root() {
                 return 1
             fi
 
-            mount \
-                -o "subvol=$ROOT_SUBVOL" \
-                "$ROOT_DEV" \
-                "$MNT"
+            # Btrfs subvolume ID 5 must be mounted using
+            # subvolid=5. Other subvolumes are mounted
+            # using their path/name.
+
+            if [[ "$ROOT_SUBVOL" == "5" ]]; then
+                log "Mounting Btrfs top-level subvolume (ID 5)..."
+
+                if ! mount \
+                    -o subvolid=5 \
+                    "$ROOT_DEV" \
+                    "$MNT"; then
+                    warn "Failed to mount Btrfs root subvolume."
+                    return 1
+                fi
+            else
+                log "Mounting Btrfs subvolume: $ROOT_SUBVOL"
+
+                if ! mount \
+                    -o "subvol=$ROOT_SUBVOL" \
+                    "$ROOT_DEV" \
+                    "$MNT"; then
+                    warn "Failed to mount Btrfs root subvolume."
+                    return 1
+                fi
+            fi
             ;;
 
         ext4|xfs|f2fs)
-            mount "$ROOT_DEV" "$MNT"
+            if ! mount "$ROOT_DEV" "$MNT"; then
+                warn "Failed to mount root filesystem."
+                return 1
+            fi
             ;;
 
         *)
@@ -160,6 +202,8 @@ mount_root() {
             return 1
             ;;
     esac
+
+    return 0
 }
 
 # ==================================================
@@ -184,19 +228,31 @@ detect_esp() {
 
             case "$spec" in
                 UUID=*)
-                    ESP_DEV="$(blkid -t "UUID=${spec#UUID=}" -o device 2>/dev/null || true)"
+                    ESP_DEV="$(
+                        blkid -t "UUID=${spec#UUID=}" \
+                            -o device 2>/dev/null || true
+                    )"
                     ;;
 
                 PARTUUID=*)
-                    ESP_DEV="$(blkid -t "PARTUUID=${spec#PARTUUID=}" -o device 2>/dev/null || true)"
+                    ESP_DEV="$(
+                        blkid -t "PARTUUID=${spec#PARTUUID=}" \
+                            -o device 2>/dev/null || true
+                    )"
                     ;;
 
                 LABEL=*)
-                    ESP_DEV="$(blkid -t "LABEL=${spec#LABEL=}" -o device 2>/dev/null || true)"
+                    ESP_DEV="$(
+                        blkid -t "LABEL=${spec#LABEL=}" \
+                            -o device 2>/dev/null || true
+                    )"
                     ;;
 
                 PARTLABEL=*)
-                    ESP_DEV="$(blkid -t "PARTLABEL=${spec#PARTLABEL=}" -o device 2>/dev/null || true)"
+                    ESP_DEV="$(
+                        blkid -t "PARTLABEL=${spec#PARTLABEL=}" \
+                            -o device 2>/dev/null || true
+                    )"
                     ;;
 
                 /dev/*)
@@ -207,6 +263,7 @@ detect_esp() {
             esac
 
             [[ -n "$ESP_DEV" ]] && break
+
         done < <(
             awk '
                 /^[[:space:]]*#/ { next }
@@ -249,6 +306,7 @@ detect_esp() {
     case "$ESP_FSTYPE" in
         vfat|fat|fat16|fat32)
             ;;
+
         *)
             warn "ESP filesystem type is '$ESP_FSTYPE'."
             return 1
@@ -272,7 +330,6 @@ detect_esp_mount() {
             $2 == "/efi" { found=1 }
             END { exit !found }
         ' "$MNT/etc/fstab"; then
-
             ESP_MOUNT="/efi"
             return 0
         fi
@@ -282,7 +339,6 @@ detect_esp_mount() {
             $2 == "/boot" { found=1 }
             END { exit !found }
         ' "$MNT/etc/fstab"; then
-
             ESP_MOUNT="/boot"
             return 0
         fi
@@ -344,7 +400,6 @@ prepare_target() {
 
     if [[ "$ROOT_FSTYPE" == "btrfs" &&
           -z "$ROOT_SUBVOL" ]]; then
-
         detect_btrfs_subvolume || return 1
     fi
 
@@ -359,7 +414,9 @@ prepare_target() {
     fi
 
     detect_esp || return 1
+
     detect_esp_mount
+
     mount_esp || return 1
 
     ok "Target prepared."

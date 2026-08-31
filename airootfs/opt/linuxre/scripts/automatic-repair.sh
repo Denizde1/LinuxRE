@@ -144,6 +144,20 @@ if (( failed == 0 )); then
     exit 0
 fi
 
+# --------------------------------------------------
+# System update
+# --------------------------------------------------
+
+echo "Updating the target system..."
+echo
+
+if linuxre_chroot "$MNT" pacman -Syu --noconfirm; then
+    ok "System update completed successfully."
+else
+    warn "System update failed. Continuing with repair..."
+fi
+
+
 # ==================================================
 # Automatic repair
 # ==================================================
