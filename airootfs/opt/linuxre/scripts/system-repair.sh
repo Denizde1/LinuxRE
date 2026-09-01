@@ -4,10 +4,13 @@ set -uo pipefail
 
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/common.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/chroot.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/repair.sh
 
@@ -86,22 +89,9 @@ while true; do
     echo "Invalid selection."
 done
 
-ROOT_DEV="${ROOTS[$((choice - 1))]}"
-
-if ! set_root "$ROOT_DEV"; then
+if ! set_root "${ROOTS[$((choice - 1))]}"; then
     die "Unable to determine root filesystem."
     exit 1
-fi
-
-# ==================================================
-# Btrfs
-# ==================================================
-
-if [[ "$ROOT_FSTYPE" == "btrfs" ]]; then
-    if ! detect_btrfs_subvolume; then
-        die "Unable to locate the Arch root subvolume."
-        exit 1
-    fi
 fi
 
 # ==================================================
@@ -109,6 +99,7 @@ fi
 # ==================================================
 
 echo
+
 log "Preparing target system..."
 
 if ! prepare_target; then
@@ -117,6 +108,7 @@ if ! prepare_target; then
 fi
 
 echo
+
 ok "Target system is ready."
 
 # ==================================================
@@ -129,6 +121,7 @@ show_target() {
     echo "             Target Summary"
     echo "========================================"
     echo
+
     echo "Root:"
     echo "  Device      : $ROOT_DEV"
     echo "  UUID        : $ROOT_UUID"
@@ -139,11 +132,13 @@ show_target() {
     fi
 
     echo
+
     echo "EFI:"
     echo "  Device      : $ESP_DEV"
     echo "  UUID        : ${ESP_UUID:-Unknown}"
     echo "  Filesystem  : $ESP_FSTYPE"
     echo "  Mount point : $ESP_MOUNT"
+
     echo
 }
 
@@ -185,6 +180,7 @@ diagnose() {
     fi
 
     echo
+
     read -rp "Press Enter to return to the menu..."
 }
 
@@ -211,14 +207,17 @@ while true; do
     echo "  Mount: $ESP_MOUNT"
 
     echo
+
     echo "────────────────────────────────────────────"
     echo
+
     echo "  1) Diagnose system"
     echo "  2) Repair kernel"
     echo "  3) Repair initramfs / UKI"
     echo "  4) Repair systemd"
     echo "  5) Repair systemd-boot"
     echo "  6) Exit"
+
     echo
     echo "────────────────────────────────────────────"
     echo
@@ -251,7 +250,7 @@ while true; do
         5)
             repair_systemd_boot
             echo
-            read -rp "Press Enter..." 
+            read -rp "Press Enter..."
             ;;
 
         6)
@@ -267,3 +266,4 @@ while true; do
             ;;
     esac
 done
+
