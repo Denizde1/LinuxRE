@@ -754,8 +754,7 @@ is_esp_partition() {
 
     parttype="$(device_parttype "$dev")"
 
-    [[ "${parttype,,}" ==
-        "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]
+    [[ "${parttype,,}" == "c12a7328-f81f-11d2-ba4b-00a0c93ec93b" ]]
 }
 
 is_esp_filesystem() {

@@ -13,6 +13,10 @@ source /opt/linuxre/lib/repair.sh
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/fsck.sh
 
+# ==================================================
+# Requirements
+# ==================================================
+
 require_root || {
     sleep 5
     exit 1
@@ -38,10 +42,34 @@ require_commands \
 # Cleanup
 # ==================================================
 
-trap cleanup_automatic_repair EXIT
+# cleanup() is provided by common.sh.
+trap cleanup EXIT
 
 # ==================================================
-# Target setup
+# Target helpers
+# ==================================================
+
+target_is_mounted() {
+    mountpoint -q "$MNT"
+}
+
+ensure_target() {
+    if target_is_mounted; then
+        return 0
+    fi
+
+    log "Target is not mounted. Preparing target..."
+
+    if ! prepare_target; then
+        warn "Failed to prepare target."
+        return 1
+    fi
+
+    return 0
+}
+
+# ==================================================
+# Header
 # ==================================================
 
 clear
@@ -55,25 +83,16 @@ echo "Preparing Automatic Repair..."
 echo "Diagnosing your PC..."
 echo
 
-# prepare_target() owns the complete target lifecycle:
-#
-#   - LUKS detection/unlock
-#   - LVM activation
-#   - root filesystem detection/selection
-#   - Btrfs subvolume detection
-#   - root filesystem mounting
-#   - Linux installation verification
-#   - ESP detection
-#   - ESP mounting
-#
+# ==================================================
+# Initial target preparation
+# ==================================================
+
 if ! prepare_target; then
     die "Automatic Repair couldn't prepare a supported Linux installation."
-    sleep 5
-    exit 1
 fi
 
 # ==================================================
-# Filesystem diagnosis
+# Initial filesystem diagnosis
 # ==================================================
 
 echo
@@ -102,7 +121,7 @@ case "$fsck_status" in
 esac
 
 # ==================================================
-# Diagnosis
+# Initial diagnosis
 # ==================================================
 
 echo
@@ -125,6 +144,10 @@ verify_systemd_boot || failed=1
 
 echo
 
+# ==================================================
+# Nothing to repair
+# ==================================================
+
 if (( failed == 0 )); then
     echo "Automatic Repair didn't find any problems."
     sleep 5
@@ -138,10 +161,14 @@ fi
 echo "Updating the target system..."
 echo
 
-if linuxre_chroot "$MNT" pacman -Syu --noconfirm; then
-    ok "System update completed successfully."
+if ensure_target; then
+    if linuxre_chroot "$MNT" pacman -Syu --noconfirm; then
+        ok "System update completed successfully."
+    else
+        warn "System update failed. Continuing with repair..."
+    fi
 else
-    warn "System update failed. Continuing with repair..."
+    warn "Target could not be prepared for system update."
 fi
 
 # ==================================================
@@ -156,16 +183,15 @@ echo
 
 repair_failed=0
 
-# --------------------------------------------------
+# ==================================================
 # Filesystem repair
-# --------------------------------------------------
+# ==================================================
 
 if (( filesystem_failed != 0 )); then
     log "Preparing filesystem repair..."
 
-    # The filesystem must not be mounted while fsck-style
-    # repair operations are performed.
-    if mountpoint -q "$MNT"; then
+    # Filesystem repair must operate on an unmounted filesystem.
+    if target_is_mounted; then
         log "Unmounting target filesystem..."
 
         if ! umount -R "$MNT"; then
@@ -175,105 +201,131 @@ if (( filesystem_failed != 0 )); then
     fi
 
     if (( repair_failed == 0 )); then
-        if ! repair_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"; then
+        if repair_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"; then
+            ok "Filesystem repair completed."
+        else
+            warn "Filesystem repair failed or is not supported."
             repair_failed=1
         fi
     fi
 
-    if (( repair_failed == 0 )); then
-        ok "Filesystem repair completed."
-
-        # Rebuild the complete target state after filesystem repair.
-        #
-        # prepare_target() handles:
-        #   - Btrfs subvolume detection
-        #   - root mount
-        #   - Linux installation verification
-        #   - ESP detection
-        #   - ESP mount
-        #
-        if ! prepare_target; then
-            warn "Failed to remount repaired target."
-            repair_failed=1
-        fi
-    fi
-fi
-
-# --------------------------------------------------
-# Package integrity
-# --------------------------------------------------
-
-if ! verify_package_integrity >/dev/null 2>&1; then
-    log "Repairing package integrity..."
-
-    if ! repair_package_integrity; then
-        repair_failed=1
-    fi
-fi
-
-# --------------------------------------------------
-# Kernel
-# --------------------------------------------------
-
-if ! verify_kernel >/dev/null 2>&1; then
-    log "Repairing kernel..."
-
-    if ! repair_kernel; then
-        repair_failed=1
-    fi
-fi
-
-# --------------------------------------------------
-# Initramfs / UKI
-# --------------------------------------------------
-
-if ! verify_initramfs >/dev/null 2>&1; then
-    log "Repairing initramfs / UKI..."
-
-    if ! repair_initramfs; then
-        repair_failed=1
-    fi
-fi
-
-# --------------------------------------------------
-# systemd
-# --------------------------------------------------
-
-if ! verify_systemd >/dev/null 2>&1; then
-    log "Repairing systemd..."
-
-    if ! repair_systemd; then
-        repair_failed=1
-    fi
-fi
-
-# --------------------------------------------------
-# systemd-boot
-# --------------------------------------------------
-
-if ! verify_systemd_boot >/dev/null 2>&1; then
-    log "Repairing systemd-boot..."
-
-    if ! repair_systemd_boot; then
+    # IMPORTANT:
+    # Regardless of whether filesystem repair succeeded,
+    # restore the complete target state before continuing.
+    if ! ensure_target; then
+        warn "Failed to restore target after filesystem repair."
         repair_failed=1
     fi
 fi
 
 # ==================================================
-# Final diagnosis
+# Package integrity repair
+# ==================================================
+
+if ! ensure_target; then
+    warn "Target is unavailable. Skipping remaining repairs."
+    repair_failed=1
+else
+    if ! verify_package_integrity >/dev/null 2>&1; then
+        log "Repairing package integrity..."
+
+        if ! repair_package_integrity; then
+            repair_failed=1
+        fi
+    fi
+fi
+
+# ==================================================
+# Kernel repair
+# ==================================================
+
+if ensure_target; then
+    if ! verify_kernel >/dev/null 2>&1; then
+        log "Repairing kernel..."
+
+        if ! repair_kernel; then
+            repair_failed=1
+        fi
+    fi
+else
+    warn "Target is unavailable. Skipping kernel repair."
+    repair_failed=1
+fi
+
+# ==================================================
+# Initramfs / UKI repair
+# ==================================================
+
+if ensure_target; then
+    if ! verify_initramfs >/dev/null 2>&1; then
+        log "Repairing initramfs / UKI..."
+
+        if ! repair_initramfs; then
+            repair_failed=1
+        fi
+    fi
+else
+    warn "Target is unavailable. Skipping initramfs / UKI repair."
+    repair_failed=1
+fi
+
+# ==================================================
+# systemd repair
+# ==================================================
+
+if ensure_target; then
+    if ! verify_systemd >/dev/null 2>&1; then
+        log "Repairing systemd..."
+
+        if ! repair_systemd; then
+            repair_failed=1
+        fi
+    fi
+else
+    warn "Target is unavailable. Skipping systemd repair."
+    repair_failed=1
+fi
+
+# ==================================================
+# systemd-boot repair
+# ==================================================
+
+if ensure_target; then
+    if ! verify_systemd_boot >/dev/null 2>&1; then
+        log "Repairing systemd-boot..."
+
+        if ! repair_systemd_boot; then
+            repair_failed=1
+        fi
+    fi
+else
+    warn "Target is unavailable. Skipping systemd-boot repair."
+    repair_failed=1
+fi
+
+# ==================================================
+# Final target preparation
 # ==================================================
 
 echo
-echo "Diagnosing your PC..."
+echo "Preparing final diagnosis..."
 echo
 
 final_failed=0
 
-# Filesystem repair was performed while the target was
-# unmounted. Verify the filesystem again before the final
-# target preparation.
+if ! ensure_target; then
+    warn "Unable to prepare target for final diagnosis."
+    final_failed=1
+fi
+
+# ==================================================
+# Final filesystem verification
+# ==================================================
+
 if (( filesystem_failed != 0 )); then
-    if mountpoint -q "$MNT"; then
+    if target_is_mounted; then
+        log "Unmounting target for final filesystem check..."
+
         if ! umount -R "$MNT"; then
             warn "Failed to unmount target before final filesystem check."
             final_failed=1
@@ -281,20 +333,26 @@ if (( filesystem_failed != 0 )); then
     fi
 
     if (( final_failed == 0 )); then
+        echo
+        log "Checking filesystem: $ROOT_DEV ($ROOT_FSTYPE)"
+
         check_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"
         final_fsck_status=$?
 
         if (( final_fsck_status != 0 )); then
+            warn "Filesystem verification failed."
             final_failed=1
+        else
+            ok "Final filesystem verification completed successfully."
         fi
     fi
 
-    # Rebuild the target state from scratch after the final
-    # filesystem check.
-    if (( final_failed == 0 )); then
-        if ! prepare_target; then
-            final_failed=1
-        fi
+    # Restore target regardless of filesystem result so that
+    # the remaining verification functions have a consistent
+    # environment.
+    if ! ensure_target; then
+        warn "Failed to restore target after final filesystem check."
+        final_failed=1
     fi
 fi
 
@@ -302,32 +360,20 @@ fi
 # Final verification
 # ==================================================
 
-if ! verify_target; then
-    final_failed=1
-fi
+echo
+echo "Diagnosing your PC..."
+echo
 
-if ! verify_pacman; then
+if ! ensure_target; then
     final_failed=1
-fi
-
-if ! verify_package_integrity; then
-    final_failed=1
-fi
-
-if ! verify_kernel; then
-    final_failed=1
-fi
-
-if ! verify_initramfs; then
-    final_failed=1
-fi
-
-if ! verify_systemd; then
-    final_failed=1
-fi
-
-if ! verify_systemd_boot; then
-    final_failed=1
+else
+    verify_target || final_failed=1
+    verify_pacman || final_failed=1
+    verify_package_integrity || final_failed=1
+    verify_kernel || final_failed=1
+    verify_initramfs || final_failed=1
+    verify_systemd || final_failed=1
+    verify_systemd_boot || final_failed=1
 fi
 
 echo
@@ -345,4 +391,3 @@ fi
 echo "Automatic Repair couldn't repair your PC."
 sleep 5
 exit 1
-
