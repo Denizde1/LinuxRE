@@ -4,12 +4,16 @@ set -uo pipefail
 
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/common.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/chroot.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/repair.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/fsck.sh
 
@@ -68,6 +72,21 @@ ensure_target() {
     return 0
 }
 
+unmount_target() {
+    if ! target_is_mounted; then
+        return 0
+    fi
+
+    log "Unmounting target filesystem..."
+
+    if ! umount -R "$MNT"; then
+        warn "Failed to unmount target filesystem."
+        return 1
+    fi
+
+    return 0
+}
+
 # ==================================================
 # Header
 # ==================================================
@@ -100,25 +119,39 @@ echo "Checking filesystem..."
 echo
 
 filesystem_failed=0
+fsck_status=0
 
-check_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"
-fsck_status=$?
+# Filesystem checks must operate on an unmounted filesystem.
+if ! unmount_target; then
+    warn "Unable to unmount target before filesystem check."
+    filesystem_failed=1
+else
+    log "Checking filesystem: $ROOT_DEV ($ROOT_FSTYPE)"
 
-case "$fsck_status" in
-    0)
-        ok "Filesystem check completed successfully."
-        ;;
+    check_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"
+    fsck_status=$?
 
-    1)
-        warn "Filesystem errors were detected."
-        filesystem_failed=1
-        ;;
+    case "$fsck_status" in
+        0)
+            ok "Filesystem check completed successfully."
+            ;;
 
-    *)
-        warn "Filesystem check could not be completed."
-        filesystem_failed=1
-        ;;
-esac
+        1)
+            warn "Filesystem errors were detected."
+            filesystem_failed=1
+            ;;
+
+        *)
+            warn "Filesystem check could not be completed."
+            filesystem_failed=1
+            ;;
+    esac
+fi
+
+# Restore the target environment for the remaining diagnostics.
+if ! ensure_target; then
+    die "Automatic Repair couldn't restore the target after filesystem diagnosis."
+fi
 
 # ==================================================
 # Initial diagnosis
@@ -191,13 +224,9 @@ if (( filesystem_failed != 0 )); then
     log "Preparing filesystem repair..."
 
     # Filesystem repair must operate on an unmounted filesystem.
-    if target_is_mounted; then
-        log "Unmounting target filesystem..."
-
-        if ! umount -R "$MNT"; then
-            warn "Failed to unmount target filesystem."
-            repair_failed=1
-        fi
+    if ! unmount_target; then
+        warn "Failed to unmount target filesystem."
+        repair_failed=1
     fi
 
     if (( repair_failed == 0 )); then
@@ -209,9 +238,7 @@ if (( filesystem_failed != 0 )); then
         fi
     fi
 
-    # IMPORTANT:
-    # Regardless of whether filesystem repair succeeded,
-    # restore the complete target state before continuing.
+    # Restore the complete target state before continuing.
     if ! ensure_target; then
         warn "Failed to restore target after filesystem repair."
         repair_failed=1
@@ -323,17 +350,16 @@ fi
 # ==================================================
 
 if (( filesystem_failed != 0 )); then
-    if target_is_mounted; then
-        log "Unmounting target for final filesystem check..."
 
-        if ! umount -R "$MNT"; then
-            warn "Failed to unmount target before final filesystem check."
-            final_failed=1
-        fi
+    # Filesystem verification must operate on an unmounted filesystem.
+    if ! unmount_target; then
+        warn "Failed to unmount target before final filesystem check."
+        final_failed=1
     fi
 
     if (( final_failed == 0 )); then
         echo
+
         log "Checking filesystem: $ROOT_DEV ($ROOT_FSTYPE)"
 
         check_filesystem "$ROOT_DEV" "$ROOT_FSTYPE"
