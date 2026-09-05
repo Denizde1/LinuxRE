@@ -38,7 +38,12 @@ map="${image}.map"
 destination_dir="$(dirname "$image")"
 
 echo
+source_size="$(blockdev --getsize64 "$source" 2>/dev/null || lsblk -dnbo SIZE "$source" 2>/dev/null || echo 0)"
+source_id="$(lsblk -dnno MODEL,SERIAL,WWN "$source" 2>/dev/null | awk 'NF {print; exit}')"
+
 echo "Source : $source"
+echo "Model  : ${source_id:-unknown}"
+echo "Size   : ${source_size:-0} bytes"
 echo "Image  : $image"
 echo "Map    : $map"
 echo

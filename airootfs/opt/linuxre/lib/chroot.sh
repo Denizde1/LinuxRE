@@ -84,6 +84,47 @@ restore_dns() {
     return 0
 }
 
+CHROOT_RUNTIME_MOUNTS=()
+
+cleanup_chroot_mounts() {
+    local mountpoint_path
+
+    if ((${#CHROOT_RUNTIME_MOUNTS[@]} == 0)); then
+        return 0
+    fi
+
+    for mountpoint_path in "${CHROOT_RUNTIME_MOUNTS[@]}"; do
+        [[ -n "$mountpoint_path" ]] || continue
+        if mountpoint -q "$mountpoint_path"; then
+            log "Unmounting chroot runtime mount: $mountpoint_path"
+            umount "$mountpoint_path" 2>/dev/null || true
+        fi
+    done
+
+    CHROOT_RUNTIME_MOUNTS=()
+    return 0
+}
+
+bind_chroot_runtime_mount() {
+    local source="$1"
+    local target="$2"
+
+    [[ -n "$source" ]] || return 1
+    mkdir -p "$target" 2>/dev/null || return 1
+
+    if mountpoint -q "$target"; then
+        return 0
+    fi
+
+    if ! mount --bind "$source" "$target" 2>/dev/null; then
+        warn "Failed to bind mount $source -> $target"
+        return 1
+    fi
+
+    CHROOT_RUNTIME_MOUNTS+=("$target")
+    return 0
+}
+
 # ==================================================
 # Chroot environment
 # ==================================================
@@ -108,9 +149,16 @@ prepare_chroot() {
         detect_esp_mount
     fi
 
-    mount_esp || return 1
+    if [[ -n "$ESP_DEV" ]] && [[ -n "$ESP_MOUNT" ]]; then
+        mount_esp || return 1
+    fi
 
     prepare_dns || return 1
+
+    bind_chroot_runtime_mount /dev "$MNT/dev" || return 1
+    bind_chroot_runtime_mount /proc "$MNT/proc" || return 1
+    bind_chroot_runtime_mount /sys "$MNT/sys" || return 1
+    bind_chroot_runtime_mount /run "$MNT/run" || return 1
 
     ok "Chroot environment prepared."
 
@@ -159,6 +207,7 @@ enter_chroot() {
     status=$?
 
     restore_dns || true
+    cleanup_chroot_mounts || true
 
     echo
 

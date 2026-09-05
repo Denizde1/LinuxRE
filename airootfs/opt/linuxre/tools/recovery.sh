@@ -120,16 +120,7 @@ while true; do
 
         2)
             clear
-
-            echo "GRUB Repair"
-            echo "────────────────────────────"
-            echo
-            echo "Typical commands:"
-            echo
-            echo "  grub-install ..."
-            echo "  grub-mkconfig -o /boot/grub/grub.cfg"
-            echo
-
+            sudo bash /opt/linuxre/scripts/grub-repair.sh
             read -rp "Press Enter to continue..." _
             ;;
 

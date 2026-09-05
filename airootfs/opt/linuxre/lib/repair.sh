@@ -105,6 +105,10 @@ verify_target() {
     return 1
 }
 
+get_target_kernel_version() {
+    linuxre_chroot "$MNT" uname -r 2>/dev/null || true
+}
+
 # ==================================================
 # Pacman verification
 # ==================================================
@@ -220,6 +224,8 @@ repair_package_integrity() {
 verify_kernel() {
 
     local boot_type
+    local kernel_version
+    local candidate
 
     log "Checking kernel..."
 
@@ -237,23 +243,33 @@ verify_kernel() {
                 echo "    UKI files:"
                 get_uki_files |
                     sed 's/^/      /'
-            else
-                warn "UKI configuration detected but no UKI files found."
-                return 1
+                return 0
             fi
 
+            warn "UKI configuration detected but no UKI files found."
+            return 1
             ;;
 
         classic)
-            local kernel
+            kernel_version="$(get_target_kernel_version)"
 
-            if kernel="$(detect_kernel)"; then
-                ok "Kernel detected: /$kernel"
-            else
-                warn "Kernel image was not found."
+            if [[ -z "$kernel_version" ]]; then
+                warn "Unable to determine the running kernel version inside the target."
                 return 1
             fi
 
+            for candidate in \
+                "$MNT/boot/vmlinuz-$kernel_version" \
+                "$MNT$ESP_MOUNT/vmlinuz-$kernel_version" \
+                "$MNT/usr/lib/modules/$kernel_version/kernel/vmlinuz"; do
+                if [[ -f "$candidate" ]]; then
+                    ok "Kernel detected: $candidate"
+                    return 0
+                fi
+            done
+
+            warn "Kernel image for version $kernel_version was not found."
+            return 1
             ;;
 
         *)
@@ -262,8 +278,6 @@ verify_kernel() {
             ;;
 
     esac
-
-    return 0
 }
 
 # ==================================================
@@ -273,6 +287,8 @@ verify_kernel() {
 verify_initramfs() {
 
     local boot_type
+    local kernel_version
+    local candidate
 
     log "Checking initramfs / UKI..."
 
@@ -295,21 +311,26 @@ verify_initramfs() {
             ;;
 
         classic)
+            kernel_version="$(get_target_kernel_version)"
 
-            if [[ -f "$MNT$ESP_MOUNT/initramfs-linux.img" ]]; then
-                ok "Main initramfs detected."
-            else
-                warn "Main initramfs is missing."
+            if [[ -z "$kernel_version" ]]; then
+                warn "Unable to determine the target kernel version."
                 return 1
             fi
 
-            if [[ -f "$MNT$ESP_MOUNT/initramfs-linux-fallback.img" ]]; then
-                ok "Fallback initramfs detected."
-            else
-                warn "Fallback initramfs is missing."
-            fi
+            for candidate in \
+                "$MNT/boot/initramfs-linux.img" \
+                "$MNT/boot/initramfs-linux-fallback.img" \
+                "$MNT$ESP_MOUNT/initramfs-linux.img" \
+                "$MNT$ESP_MOUNT/initramfs-linux-fallback.img"; do
+                if [[ -f "$candidate" ]]; then
+                    ok "Initramfs detected: $candidate"
+                    return 0
+                fi
+            done
 
-            return 0
+            warn "No initramfs image for kernel $kernel_version was found."
+            return 1
             ;;
 
         *)
@@ -331,10 +352,17 @@ verify_systemd() {
 
     if [[ -x "$MNT/usr/lib/systemd/systemd" ]]; then
         ok "systemd detected."
+    else
+        warn "systemd binary was not found."
+        return 1
+    fi
+
+    if linuxre_chroot "$MNT" systemd-analyze verify /etc/systemd/system >/dev/null 2>&1; then
+        ok "systemd unit configuration appears valid."
         return 0
     fi
 
-    warn "systemd binary was not found."
+    warn "systemd unit validation reported issues."
     return 1
 }
 
@@ -346,20 +374,50 @@ verify_systemd_boot() {
 
     log "Checking systemd-boot..."
 
+    if ! is_uefi_system; then
+        warn "UEFI firmware not detected; systemd-boot is not applicable in this environment."
+        return 1
+    fi
+
     if [[ ! -x "$MNT/usr/bin/bootctl" ]]; then
         warn "bootctl was not found."
         return 1
     fi
 
-    if [[ -f "$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi" ||
-          -f "$MNT$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI" ]]; then
-
-        ok "systemd-boot EFI files detected."
-        return 0
+    if [[ -z "$ESP_DEV" ]] || [[ -z "$ESP_MOUNT" ]]; then
+        warn "No valid EFI System Partition was detected for the target install."
+        return 1
     fi
 
-    warn "systemd-boot EFI files were not found."
-    return 1
+    local loader_conf="$MNT$ESP_MOUNT/loader/loader.conf"
+    local efi_boot="$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi"
+    local fallback_efi="$MNT$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI"
+
+    if [[ -f "$loader_conf" ]]; then
+        ok "systemd-boot loader configuration exists: $loader_conf"
+    else
+        warn "systemd-boot loader configuration is missing: $loader_conf"
+        return 1
+    fi
+
+    if [[ -f "$efi_boot" ]] || [[ -f "$fallback_efi" ]]; then
+        ok "systemd-boot EFI files detected."
+    else
+        warn "systemd-boot EFI files were not found."
+        return 1
+    fi
+
+    if command -v efibootmgr >/dev/null 2>&1; then
+        if efibootmgr -v 2>/dev/null | grep -q 'Boot'; then
+            ok "NVRAM boot entries are present."
+        else
+            warn "efibootmgr is available but no boot entries were detected."
+        fi
+    else
+        log "efibootmgr is not installed; NVRAM validation is skipped."
+    fi
+
+    return 0
 }
 
 # ==================================================
@@ -532,6 +590,17 @@ repair_systemd_boot() {
     echo "========================================"
     echo
 
+    if ! is_uefi_system; then
+        warn "UEFI firmware not detected; systemd-boot repair is not applicable in this environment."
+        return 1
+    fi
+
+    if [[ -z "$ESP_DEV" ]] || [[ -z "$ESP_MOUNT" ]]; then
+        detect_esp || return 1
+        detect_esp_mount
+        mount_esp || return 1
+    fi
+
     log "Installing systemd-boot..."
 
     if ! linuxre_chroot "$MNT" bootctl install; then
@@ -539,7 +608,18 @@ repair_systemd_boot() {
         return 1
     fi
 
-    ok "systemd-boot installed."
+    log "Updating systemd-boot configuration..."
+    if ! linuxre_chroot "$MNT" bootctl update; then
+        warn "systemd-boot update failed."
+        return 1
+    fi
+
+    if [[ -f "$MNT$ESP_MOUNT/loader/loader.conf" ]] || [[ -f "$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi" ]]; then
+        ok "systemd-boot installed and updated."
+    else
+        warn "systemd-boot repair completed but the expected EFI files were not found."
+        return 1
+    fi
 
     return 0
 }

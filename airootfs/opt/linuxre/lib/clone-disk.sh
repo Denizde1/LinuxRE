@@ -39,9 +39,26 @@ if [[ "$source" == "$target" ]]; then
     exit 1
 fi
 
+source_size="$(blockdev --getsize64 "$source" 2>/dev/null || lsblk -dnbo SIZE "$source" 2>/dev/null || echo 0)"
+target_size="$(blockdev --getsize64 "$target" 2>/dev/null || lsblk -dnbo SIZE "$target" 2>/dev/null || echo 0)"
+source_id="$(lsblk -dnno MODEL,SERIAL,WWN "$source" 2>/dev/null | awk 'NF {print; exit}')"
+target_id="$(lsblk -dnno MODEL,SERIAL,WWN "$target" 2>/dev/null | awk 'NF {print; exit}')"
+
+if (( source_size > 0 )) && (( target_size > 0 )) && (( source_size > target_size )); then
+    echo
+    echo "Error: The target device is smaller than the source device."
+    echo "Source size: $source_size bytes"
+    echo "Target size: $target_size bytes"
+    exit 1
+fi
+
 echo
 echo "Source: $source"
+echo "Source model/serial: ${source_id:-unknown}"
 echo "Target: $target"
+echo "Target model/serial: ${target_id:-unknown}"
+echo "Source size: $source_size bytes"
+echo "Target size: $target_size bytes"
 echo
 
 echo "========================================"

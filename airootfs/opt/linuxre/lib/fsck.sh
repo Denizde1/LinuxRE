@@ -74,6 +74,7 @@ check_filesystem() {
 repair_filesystem() {
     local device="${1:-}"
     local fstype="${2:-}"
+    local repair_status=0
 
     if [[ ! -b "$device" ]]; then
         warn "Invalid block device: $device"
@@ -90,10 +91,12 @@ repair_filesystem() {
     case "$fstype" in
         ext2|ext3|ext4)
             fsck -fy "$device"
+            repair_status=$?
             ;;
 
         f2fs)
             fsck.f2fs -a "$device"
+            repair_status=$?
             ;;
 
         vfat|exfat)
@@ -121,4 +124,17 @@ repair_filesystem() {
             return 1
             ;;
     esac
+
+    if (( repair_status != 0 )); then
+        warn "Filesystem repair returned status $repair_status for $device."
+        return 1
+    fi
+
+    if ! check_filesystem "$device" "$fstype" >/dev/null 2>&1; then
+        warn "Filesystem verification after repair failed for $device."
+        return 1
+    fi
+
+    ok "Filesystem verification succeeded for $device."
+    return 0
 }
