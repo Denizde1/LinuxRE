@@ -17,6 +17,43 @@ source /opt/linuxre/lib/repair.sh
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/fsck.sh
 
+write_repair_report() {
+    local status="${1:-FAIL}"
+    local timestamp
+    timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+    mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null || {
+        warn "Unable to create repair report directory."
+        return 1
+    }
+
+    {
+        echo "LinuxRE Repair Report"
+        echo "Timestamp: $timestamp"
+        echo "Status: $status"
+        echo "Target root: ${ROOT_DEV:-unknown}"
+        echo "Root UUID: ${ROOT_UUID:-unknown}"
+        echo "Root filesystem: ${ROOT_FSTYPE:-unknown}"
+        echo "Btrfs subvolume: ${ROOT_SUBVOL:-n/a}"
+        echo "LUKS mapper: ${TARGET_LUKS_MAPPER:-n/a}"
+        echo "LVM VG: ${TARGET_LVM_VG:-n/a}"
+        echo "ESP: ${ESP_DEV:-unknown}"
+        echo "ESP mount point: ${ESP_MOUNT:-n/a}"
+        echo "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}"
+        echo "Bootloader: $(detect_target_bootloader)"
+        echo "Filesystem status: ${filesystem_failed:-unknown}"
+        echo "Repair status: ${repair_failed:-unknown}"
+        echo "Final status: ${final_failed:-unknown}"
+    } > "$REPORT_FILE_PATH" || {
+        warn "Unable to write repair report: $REPORT_FILE_PATH"
+        return 1
+    }
+
+    chmod 600 "$REPORT_FILE_PATH" 2>/dev/null || true
+
+    log "Repair report written to $REPORT_FILE_PATH"
+}
+
 # ==================================================
 # Requirements
 # ==================================================
@@ -425,12 +462,16 @@ echo
 # Result
 # ==================================================
 
+TARGET_BOOT_MODE="$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)"
+
 if (( repair_failed == 0 && final_failed == 0 )); then
     echo "Automatic Repair successfully repaired your PC."
+    write_repair_report "PASS"
     sleep 5
     exit 0
 fi
 
 echo "Automatic Repair couldn't repair your PC."
+write_repair_report "FAIL"
 sleep 5
 exit 1

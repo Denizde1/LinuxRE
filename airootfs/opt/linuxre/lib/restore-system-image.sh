@@ -2,6 +2,11 @@
 
 set -uo pipefail
 
+if [[ "$EUID" -ne 0 ]]; then
+    echo "Error: Image restore must be run as root." >&2
+    exit 1
+fi
+
 echo "========================================"
 echo "       Restore System Image"
 echo "========================================"
@@ -33,9 +38,24 @@ if [[ ! -b "$target" ]]; then
     exit 1
 fi
 
+image_size="$(stat -c '%s' "$image" 2>/dev/null || echo 0)"
+target_size="$(blockdev --getsize64 "$target" 2>/dev/null || lsblk -dnbo SIZE "$target" 2>/dev/null || echo 0)"
+target_id="$(lsblk -dnno MODEL,SERIAL,WWN "$target" 2>/dev/null | awk 'NF {print; exit}')"
+
+if (( image_size > 0 )) && (( target_size > 0 )) && (( image_size > target_size )); then
+    echo
+    echo "Error: The target device is smaller than the image."
+    echo "Image size: $image_size bytes"
+    echo "Target size: $target_size bytes"
+    exit 1
+fi
+
 echo
 echo "Image : $image"
 echo "Target: $target"
+echo "Target model/serial: ${target_id:-unknown}"
+echo "Image size: $image_size bytes"
+echo "Target size: $target_size bytes"
 echo
 echo "WARNING!"
 echo "All existing data on the target may be overwritten."

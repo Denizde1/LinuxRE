@@ -9,20 +9,30 @@ TMP="${TMP:-$MNT/.linuxre}"
 # Logging
 # ==================================================
 
+REPORT_LOG_PATH="${REPORT_LOG_PATH:-/var/log/linuxre-repair.log}"
+REPORT_FILE_PATH="${REPORT_FILE_PATH:-/var/log/linuxre-repair-report.txt}"
+
+mkdir -p "$(dirname "$REPORT_LOG_PATH")" 2>/dev/null || true
+mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null || true
+
 log() {
     printf '[*] %s\n' "$*"
+    printf '%s\n' "$*" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 }
 
 ok() {
     printf '[OK] %s\n' "$*"
+    printf '%s\n' "$*" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 }
 
 warn() {
     printf '[!] %s\n' "$*" >&2
+    printf '%s\n' "$*" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 }
 
 die() {
     printf '[ERROR] %s\n' "$*" >&2
+    printf '%s\n' "$*" >> "$REPORT_LOG_PATH" 2>/dev/null || true
     return 1
 }
 

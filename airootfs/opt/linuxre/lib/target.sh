@@ -13,6 +13,10 @@ ROOT_DEV=""
 ROOT_UUID=""
 ROOT_FSTYPE=""
 ROOT_SUBVOL=""
+TARGET_LVM_VG=""
+TARGET_LUKS_MAPPER=""
+# shellcheck disable=SC2034
+TARGET_BOOT_MODE=""
 
 ESP_DEV=""
 ESP_UUID=""
@@ -77,6 +81,38 @@ device_exists() {
     [[ -b "$1" ]]
 }
 
+device_size_bytes() {
+    if command -v blockdev >/dev/null 2>&1; then
+        blockdev --getsize64 "$1" 2>/dev/null || echo 0
+        return 0
+    fi
+
+    lsblk -dnbo SIZE "$1" 2>/dev/null || echo 0
+}
+
+device_model_summary() {
+    local dev="$1"
+    local model serial size
+
+    model="$(lsblk -dnno MODEL "$dev" 2>/dev/null || true)"
+    serial="$(lsblk -dnno SERIAL "$dev" 2>/dev/null || true)"
+    size="$(lsblk -dnno SIZE "$dev" 2>/dev/null || true)"
+
+    if [[ -n "$model" ]]; then
+        printf '%s' "$model"
+    else
+        printf '%s' "unknown-model"
+    fi
+
+    if [[ -n "$serial" ]]; then
+        printf ' [%s]' "$serial"
+    fi
+
+    if [[ -n "$size" ]]; then
+        printf ' [%s]' "$size"
+    fi
+}
+
 device_fstype() {
     blkid -o value -s TYPE "$1" 2>/dev/null || true
 }
@@ -95,6 +131,46 @@ device_parttype() {
 
 device_label() {
     blkid -o value -s LABEL "$1" 2>/dev/null || true
+}
+
+describe_root_selection() {
+    log "Target root selected: $ROOT_DEV"
+    log "Root filesystem: $ROOT_FSTYPE"
+    [[ -n "$ROOT_UUID" ]] && log "Root UUID: $ROOT_UUID"
+    [[ -n "$ROOT_SUBVOL" ]] && log "Btrfs root subvolume: $ROOT_SUBVOL"
+    [[ -n "$TARGET_LVM_VG" ]] && log "Root LVM VG: $TARGET_LVM_VG"
+    [[ -n "$TARGET_LUKS_MAPPER" ]] && log "Root LUKS mapper: $TARGET_LUKS_MAPPER"
+}
+
+describe_esp_selection() {
+    if [[ -z "$ESP_DEV" ]]; then
+        log "ESP not selected; no EFI System Partition was detected for the current boot mode."
+        return 0
+    fi
+
+    log "ESP selected: $ESP_DEV"
+    log "ESP filesystem: ${ESP_FSTYPE:-unknown}"
+    [[ -n "$ESP_UUID" ]] && log "ESP UUID: $ESP_UUID"
+    log "ESP mount point: ${ESP_MOUNT:-unknown}"
+}
+
+describe_luks_selection() {
+    if ((${#LUKS_DEVICES[@]} == 0)); then
+        log "No LUKS devices detected."
+        return 0
+    fi
+
+    log "Detected LUKS devices: ${LUKS_DEVICES[*]}"
+}
+
+describe_lvm_selection() {
+    if ((${#LVM_VGS[@]} == 0)); then
+        log "No LVM volume groups detected."
+        return 0
+    fi
+
+    log "Detected LVM volume groups: ${LVM_VGS[*]}"
+    [[ -n "$TARGET_LVM_VG" ]] && log "Selected LVM VG: $TARGET_LVM_VG"
 }
 
 is_mounted_device() {
@@ -180,6 +256,7 @@ unlock_luks_device() {
     }
 
     mapper="/dev/mapper/$mapper_name"
+    TARGET_LUKS_MAPPER="$mapper"
 
     # Already unlocked before LinuxRE touched it.
     if [[ -b "$mapper" ]]; then
@@ -349,65 +426,78 @@ get_active_vgs() {
 }
 
 # ==================================================
+# Select an LVM volume group
+# ==================================================
+
+select_lvm_vg() {
+    local selection
+    local i=1
+    local vg
+
+    ((${#LVM_VGS[@]} > 0)) || return 1
+
+    log "LVM volume groups available for target selection:"
+    for vg in "${LVM_VGS[@]}"; do
+        printf '  [%d] %s\n' "$i" "$vg"
+        ((i++))
+    done
+
+    if ((${#LVM_VGS[@]} == 1)); then
+        selection=1
+    else
+        read -r -p "Select target LVM volume group [1-${#LVM_VGS[@]}]: " selection
+    fi
+
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] ||
+       ((selection < 1 || selection > ${#LVM_VGS[@]})); then
+        warn "Invalid LVM volume group selection."
+        return 1
+    fi
+
+    TARGET_LVM_VG="${LVM_VGS[$((selection - 1))]}"
+    log "Selected LVM volume group: $TARGET_LVM_VG"
+    return 0
+}
+
+# ==================================================
 # LVM activation
 # ==================================================
 
 activate_lvm() {
+    local target_vg="${1:-}"
+    local vg_active
+
     require_commands vgscan vgchange vgs lvs || return 1
 
     log "Scanning for LVM volume groups..."
-
     vgscan --mknodes >/dev/null 2>&1 || true
 
-    local before_file
-    local after_file
-    local vg
+    if [[ -n "$target_vg" ]]; then
+        log "Activating only the selected LVM volume group: $target_vg"
+        vg_active="$(vgs --noheadings --options vg_active "$target_vg" 2>/dev/null |
+            sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -n1)"
 
-    before_file="/tmp/linuxre-vgs-before.$$"
-    after_file="/tmp/linuxre-vgs-after.$$"
-
-    get_active_vgs > "$before_file"
-
-    if ! vgchange --available y >/dev/null 2>&1; then
-        warn "Failed to activate LVM volume groups."
-        rm -f "$before_file" "$after_file"
-        return 1
-    fi
-
-    get_active_vgs > "$after_file"
-
-    while IFS= read -r vg; do
-        [[ -n "$vg" ]] || continue
-
-        if ! grep -Fxq "$vg" "$before_file"; then
-            ACTIVATED_VGS+=("$vg")
+        if [[ "$vg_active" != "active" ]] &&
+           ! vgchange --available y "$target_vg" >/dev/null 2>&1; then
+            warn "Failed to activate LVM volume group: $target_vg"
+            return 1
         fi
-    done < "$after_file"
 
-    rm -f "$before_file" "$after_file"
+        if [[ "$vg_active" != "active" ]] &&
+           ! printf '%s\n' "${ACTIVATED_VGS[@]}" | grep -qxF "$target_vg"; then
+            ACTIVATED_VGS+=("$target_vg")
+        fi
+        detect_lvm || return 1
+        [[ -n "$TARGET_LVM_VG" ]] || TARGET_LVM_VG="$target_vg"
 
-    detect_lvm || return 1
+        if ((${#LVM_VGS[@]} > 0)); then
+            log "Detected LVM volume groups: ${LVM_VGS[*]}"
+        fi
 
-    if ((${#LVM_VGS[@]} == 0)); then
         return 0
     fi
 
-    log "Detected LVM volume groups:"
-
-    for vg in "${LVM_VGS[@]}"; do
-        printf '  %s\n' "$vg"
-    done
-
-    if ((${#LVM_LVS[@]} > 0)); then
-        log "Detected logical volumes:"
-
-        local lv
-
-        for lv in "${LVM_LVS[@]}"; do
-            printf '  %s\n' "$lv"
-        done
-    fi
-
+    warn "No selected LVM volume group was provided. LVM activation is skipped to avoid activating unrelated storage."
     return 0
 }
 
@@ -418,12 +508,24 @@ activate_lvm() {
 add_root_candidate() {
     local dev="$1"
     local fstype
+    local candidate_vg
 
     [[ -b "$dev" ]] || return 0
 
     fstype="$(device_fstype "$dev")"
 
     is_supported_root_fs "$fstype" || return 0
+
+    if [[ -n "$TARGET_LVM_VG" ]] && command -v lvs >/dev/null 2>&1; then
+        candidate_vg="$(
+            lvs --noheadings --options vg_name \
+                --select "lv_path=$dev" 2>/dev/null |
+                sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+                head -n1
+        )"
+
+        [[ "$candidate_vg" == "$TARGET_LVM_VG" ]] || return 0
+    fi
 
     ROOTS+=("$dev")
 }
@@ -582,6 +684,8 @@ set_root() {
     local dev="$1"
     local fstype
     local uuid
+    local base_name
+    local selected_vg="$TARGET_LVM_VG"
 
     if ! device_exists "$dev"; then
         warn "Invalid block device: $dev"
@@ -605,10 +709,30 @@ set_root() {
     ROOT_UUID="$uuid"
     ROOT_FSTYPE="$fstype"
     ROOT_SUBVOL=""
+    TARGET_LVM_VG="$selected_vg"
+    TARGET_LUKS_MAPPER=""
 
-    log "Selected root: $ROOT_DEV"
-    log "Filesystem: $ROOT_FSTYPE"
-    log "UUID: $ROOT_UUID"
+    if [[ "$ROOT_DEV" =~ ^/dev/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+$ ]]; then
+        base_name="${ROOT_DEV#/dev/}"
+        if [[ "$base_name" == *"/"* ]]; then
+            TARGET_LVM_VG="${base_name%%/*}"
+        fi
+    fi
+
+    if [[ -z "$TARGET_LVM_VG" ]] && command -v lvs >/dev/null 2>&1; then
+        TARGET_LVM_VG="$(
+            lvs --noheadings --options vg_name --select "lv_path=$ROOT_DEV" 2>/dev/null |
+                sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+                head -n1
+        )"
+    fi
+
+    if [[ -z "$TARGET_LVM_VG" ]] && [[ "$ROOT_DEV" == /dev/mapper/* ]]; then
+        TARGET_LUKS_MAPPER="$ROOT_DEV"
+    fi
+
+    describe_root_selection
+    log "Device summary: $(device_model_summary "$ROOT_DEV")"
 
     return 0
 }
@@ -656,8 +780,8 @@ detect_btrfs_subvolume() {
     umount "$tmp" 2>/dev/null || true
 
     if [[ -z "$ROOT_SUBVOL" ]]; then
-        warn "Unable to determine Btrfs root subvolume."
-        return 1
+        warn "Unable to determine Btrfs root subvolume. Falling back to the top-level subvolume."
+        ROOT_SUBVOL="5"
     fi
 
     if [[ "$ROOT_SUBVOL" == "5" ]]; then
@@ -748,101 +872,12 @@ mount_root() {
 }
 
 # ==================================================
-# Mount ESP
-# ==================================================
-
-# shellcheck disable=SC2329
-mount_esp() {
-
-    [[ -n "$ESP_DEV" ]] || {
-        warn "ESP device is not set."
-        return 1
-    }
-
-    [[ -n "$ESP_MOUNT" ]] || {
-        warn "ESP mount point is not set."
-        return 1
-    }
-
-    local target="$MNT$ESP_MOUNT"
-    local existing_target
-    local existing_source
-
-    mkdir -p "$target"
-
-    # Already mounted at target.
-    if is_mounted_path "$target"; then
-        existing_source="$(
-            findmnt \
-                -rn \
-                -o SOURCE \
-                --target "$target" \
-                2>/dev/null |
-                head -n1
-        )"
-
-        if [[ "$existing_source" == "$ESP_DEV" ]]; then
-            log "ESP already mounted: $target"
-            return 0
-        fi
-
-        warn "ESP mount point is already occupied: $target"
-        return 1
-    fi
-
-    # ESP may already be mounted somewhere else.
-    if is_mounted_device "$ESP_DEV"; then
-        existing_target="$(
-            findmnt \
-                -rn \
-                -S "$ESP_DEV" \
-                -o TARGET \
-                2>/dev/null |
-                head -n1
-        )"
-
-        if [[ -n "$existing_target" ]]; then
-            log "ESP is already mounted at: $existing_target"
-
-            # If it is already under our target root, reuse it.
-            if [[ "$existing_target" == "$target" ]]; then
-                return 0
-            fi
-
-            warn "ESP is already mounted elsewhere: $existing_target"
-            return 1
-        fi
-    fi
-
-    log "Mounting ESP: $ESP_DEV -> $ESP_MOUNT"
-
-    if ! mount "$ESP_DEV" "$target"; then
-        warn "Failed to mount ESP."
-        return 1
-    fi
-
-    # The mount succeeded, so cleanup must now know that
-    # LinuxRE owns this mount.
-    TARGET_ESP_MOUNTED=1
-
-    if ! is_mounted_path "$target"; then
-        warn "ESP mount verification failed."
-
-        if umount "$target" 2>/dev/null; then
-            TARGET_ESP_MOUNTED=0
-        else
-            warn "Failed to clean up ESP mount."
-        fi
-
-        return 1
-    fi
-
-    return 0
-}
-
-# ==================================================
 # EFI System Partition helpers
 # ==================================================
+
+is_uefi_system() {
+    [[ -d /sys/firmware/efi ]] || [[ -d /sys/firmware/efi/efivars ]]
+}
 
 is_esp_partition() {
     local dev="$1"
@@ -911,6 +946,11 @@ detect_esp() {
     ESP_DEV=""
     ESP_UUID=""
     ESP_FSTYPE=""
+
+    if ! is_uefi_system; then
+        warn "UEFI firmware not detected. Skipping EFI System Partition detection."
+        return 0
+    fi
 
     local fstab="$MNT/etc/fstab"
     local spec
@@ -999,7 +1039,7 @@ detect_esp() {
     fi
 
     if [[ -z "$ESP_DEV" || ! -b "$ESP_DEV" ]]; then
-        warn "EFI System Partition not found."
+        warn "EFI System Partition not found for the current UEFI system."
         return 1
     fi
 
@@ -1023,6 +1063,11 @@ detect_esp() {
 
 detect_esp_mount() {
     ESP_MOUNT=""
+
+    if ! is_uefi_system; then
+        log "UEFI firmware not detected; skipping ESP mount point detection."
+        return 0
+    fi
 
     local fstab="$MNT/etc/fstab"
 
@@ -1136,6 +1181,7 @@ mount_esp() {
 
     if ! is_mounted_path "$target"; then
         warn "ESP mount verification failed."
+        umount --recursive "$target" 2>/dev/null || true
         return 1
     fi
 
@@ -1227,6 +1273,10 @@ reset_target_state() {
     ROOT_UUID=""
     ROOT_FSTYPE=""
     ROOT_SUBVOL=""
+    TARGET_LVM_VG=""
+    TARGET_LUKS_MAPPER=""
+    # shellcheck disable=SC2034
+    TARGET_BOOT_MODE=""
 
     ESP_DEV=""
     ESP_UUID=""
@@ -1292,28 +1342,51 @@ prepare_target() {
     fi
 
     # --------------------------------------------------
-    # LVM activation
+    # Root selection and inactive LVM discovery
     # --------------------------------------------------
 
-    if command -v vgchange >/dev/null 2>&1 &&
-       command -v vgs >/dev/null 2>&1; then
+    detect_lvm || true
 
-        activate_lvm || {
-            warn "LVM activation failed."
+    if ! select_root_filesystem; then
+        if ((${#LVM_VGS[@]} == 0)); then
+            warn "Unable to find a suitable target root filesystem."
+            cleanup_target_storage
+            return 1
+        fi
+
+        select_lvm_vg || {
+            warn "Unable to select a target LVM volume group."
+            cleanup_target_storage
+            return 1
+        }
+
+        activate_lvm "$TARGET_LVM_VG" || {
+            warn "LVM activation failed for selected volume group: $TARGET_LVM_VG"
+            cleanup_target_storage
+            return 1
+        }
+
+        select_root_filesystem || {
+            warn "Unable to find a root filesystem in selected volume group."
             cleanup_target_storage
             return 1
         }
     fi
 
     # --------------------------------------------------
-    # Root selection
+    # LVM activation for the selected target only
     # --------------------------------------------------
 
-    select_root_filesystem || {
-        warn "Unable to find a suitable target root filesystem."
-        cleanup_target_storage
-        return 1
-    }
+    if [[ -n "$TARGET_LVM_VG" ]] &&
+       command -v vgchange >/dev/null 2>&1 &&
+       command -v vgs >/dev/null 2>&1 &&
+       ! printf '%s\n' "${ACTIVATED_VGS[@]}" | grep -qxF "$TARGET_LVM_VG"; then
+        activate_lvm "$TARGET_LVM_VG" || {
+            warn "LVM activation failed for selected volume group: $TARGET_LVM_VG"
+            cleanup_target_storage
+            return 1
+        }
+    fi
 
     # --------------------------------------------------
     # Btrfs subvolume
@@ -1350,17 +1423,17 @@ prepare_target() {
     # Detect and mount ESP
     # --------------------------------------------------
 
-    detect_esp || {
-        cleanup_target_storage
-        return 1
-    }
-
-    detect_esp_mount
-
-    mount_esp || {
-        cleanup_target_storage
-        return 1
-    }
+    if ! detect_esp; then
+        log "Skipping ESP detection and mount because no UEFI boot environment was detected."
+        ESP_DEV=""
+        ESP_MOUNT=""
+    else
+        detect_esp_mount
+        mount_esp || {
+            cleanup_target_storage
+            return 1
+        }
+    fi
 
     # --------------------------------------------------
     # Final verification
@@ -1372,14 +1445,17 @@ prepare_target() {
         return 1
     fi
 
-    if ! is_mounted_path "$MNT$ESP_MOUNT"; then
-        warn "Target ESP is not mounted."
+    if [[ -n "$ESP_MOUNT" ]] && ! is_mounted_path "$MNT$ESP_MOUNT"; then
+        warn "Target ESP is not mounted at $MNT$ESP_MOUNT."
         cleanup_target_storage
         return 1
     fi
+
+    describe_esp_selection
+    describe_luks_selection
+    describe_lvm_selection
 
     ok "Target prepared."
 
     return 0
 }
-
