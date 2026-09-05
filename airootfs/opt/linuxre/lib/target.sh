@@ -483,7 +483,8 @@ activate_lvm() {
             return 1
         fi
 
-        if [[ "$vg_active" != "active" ]]; then
+        if [[ "$vg_active" != "active" ]] &&
+           ! printf '%s\n' "${ACTIVATED_VGS[@]}" | grep -qxF "$target_vg"; then
             ACTIVATED_VGS+=("$target_vg")
         fi
         detect_lvm || return 1
@@ -507,12 +508,24 @@ activate_lvm() {
 add_root_candidate() {
     local dev="$1"
     local fstype
+    local candidate_vg
 
     [[ -b "$dev" ]] || return 0
 
     fstype="$(device_fstype "$dev")"
 
     is_supported_root_fs "$fstype" || return 0
+
+    if [[ -n "$TARGET_LVM_VG" ]] && command -v lvs >/dev/null 2>&1; then
+        candidate_vg="$(
+            lvs --noheadings --options vg_name \
+                --select "lv_path=$dev" 2>/dev/null |
+                sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+                head -n1
+        )"
+
+        [[ "$candidate_vg" == "$TARGET_LVM_VG" ]] || return 0
+    fi
 
     ROOTS+=("$dev")
 }
@@ -672,6 +685,7 @@ set_root() {
     local fstype
     local uuid
     local base_name
+    local selected_vg="$TARGET_LVM_VG"
 
     if ! device_exists "$dev"; then
         warn "Invalid block device: $dev"
@@ -695,7 +709,7 @@ set_root() {
     ROOT_UUID="$uuid"
     ROOT_FSTYPE="$fstype"
     ROOT_SUBVOL=""
-    TARGET_LVM_VG=""
+    TARGET_LVM_VG="$selected_vg"
     TARGET_LUKS_MAPPER=""
 
     if [[ "$ROOT_DEV" =~ ^/dev/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+$ ]]; then

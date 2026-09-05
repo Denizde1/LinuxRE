@@ -65,8 +65,8 @@ fi
 
 log "Repairing GRUB UEFI installation..."
 
-if ! linuxre_chroot "$MNT" command -v grub-install >/dev/null 2>&1 ||
-   ! linuxre_chroot "$MNT" command -v grub-mkconfig >/dev/null 2>&1; then
+if ! linuxre_chroot "$MNT" test -x /usr/bin/grub-install ||
+   ! linuxre_chroot "$MNT" test -x /usr/bin/grub-mkconfig; then
     warn "GRUB repair commands are not installed in the target system."
     exit 1
 fi

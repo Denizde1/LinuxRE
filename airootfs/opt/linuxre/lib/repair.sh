@@ -114,6 +114,25 @@ get_target_kernel_versions() {
     done | sort -V
 }
 
+get_target_initramfs_files() {
+    local preset
+    local image
+
+    for preset in "$MNT"/etc/mkinitcpio.d/*.preset; do
+        [[ -f "$preset" ]] || continue
+
+        while IFS= read -r image; do
+            [[ -n "$image" ]] || continue
+            image="${image#\"}"
+            image="${image%\"}"
+            [[ "$image" == /* ]] || continue
+            printf '%s\n' "$MNT$image"
+        done < <(
+            sed -nE 's/^[[:space:]]*(default_image|fallback_image)[[:space:]]*=[[:space:]]*"([^"]+)".*$/\2/p' "$preset"
+        )
+    done | sort -u
+}
+
 detect_target_bootloader() {
     local loader_conf=""
     local systemd_boot_efi=""
@@ -319,7 +338,6 @@ verify_kernel() {
 verify_initramfs() {
 
     local boot_type
-    local kernel_version
     local candidate
 
     log "Checking initramfs / UKI..."
@@ -348,16 +366,14 @@ verify_initramfs() {
                 return 1
             fi
 
-            for candidate in \
-                "$MNT/boot"/initramfs-*.img \
-                "$MNT$ESP_MOUNT"/initramfs-*.img; do
+            while IFS= read -r candidate; do
                 if [[ -f "$candidate" ]]; then
                     ok "Initramfs detected: $candidate"
                     return 0
                 fi
-            done
+            done < <(get_target_initramfs_files)
 
-            warn "No initramfs image was found for the installed target kernels."
+            warn "No initramfs image from the installed target kernel presets was found."
             return 1
             ;;
 
@@ -646,25 +662,35 @@ repair_systemd_boot() {
         mount_esp || return 1
     fi
 
-    log "Installing systemd-boot..."
-
-    if ! linuxre_chroot "$MNT" bootctl install; then
-        warn "systemd-boot installation failed."
+    if [[ ! -x "$MNT/usr/bin/bootctl" ]]; then
+        warn "bootctl was not found in the target system."
         return 1
     fi
 
-    log "Updating systemd-boot configuration..."
-    if ! linuxre_chroot "$MNT" bootctl update; then
+    local loader_conf="$MNT$ESP_MOUNT/loader/loader.conf"
+    local efi_boot="$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi"
+    local fallback_efi="$MNT$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI"
+
+    if [[ ! -f "$loader_conf" ]] ||
+       { [[ ! -f "$efi_boot" ]] && [[ ! -f "$fallback_efi" ]]; }; then
+        log "Installing systemd-boot on the detected ESP..."
+        if ! linuxre_chroot "$MNT" bootctl "--esp-path=$ESP_MOUNT" install; then
+            warn "systemd-boot installation failed."
+            return 1
+        fi
+    fi
+
+    log "Updating systemd-boot files..."
+    if ! linuxre_chroot "$MNT" bootctl "--esp-path=$ESP_MOUNT" update; then
         warn "systemd-boot update failed."
         return 1
     fi
 
-    if [[ -f "$MNT$ESP_MOUNT/loader/loader.conf" ]] || [[ -f "$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi" ]]; then
-        ok "systemd-boot installed and updated."
-    else
-        warn "systemd-boot repair completed but the expected EFI files were not found."
-        return 1
+    if verify_systemd_boot; then
+        ok "systemd-boot installed and verified."
+        return 0
     fi
 
-    return 0
+    warn "systemd-boot repair completed but verification failed."
+    return 1
 }

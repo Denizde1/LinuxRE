@@ -136,6 +136,8 @@ bind_chroot_runtime_mount() {
 # ==================================================
 
 prepare_chroot() {
+    local esp_mounted_here=0
+
     if [[ ! -d "$MNT/etc" ]]; then
         warn "Target filesystem is not mounted."
         return 1
@@ -156,7 +158,10 @@ prepare_chroot() {
     fi
 
     if [[ -n "$ESP_DEV" ]] && [[ -n "$ESP_MOUNT" ]]; then
-        mount_esp || return 1
+        if (( ! TARGET_ESP_MOUNTED )); then
+            mount_esp || return 1
+            esp_mounted_here=1
+        fi
     fi
 
     if ! prepare_dns ||
@@ -166,6 +171,12 @@ prepare_chroot() {
        ! bind_chroot_runtime_mount /run "$MNT/run"; then
         restore_dns || true
         cleanup_chroot_mounts
+        if (( esp_mounted_here )) &&
+           [[ -n "$ESP_MOUNT" ]] &&
+           mountpoint -q "$MNT$ESP_MOUNT"; then
+            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
+            TARGET_ESP_MOUNTED=0
+        fi
         return 1
     fi
 
