@@ -15,6 +15,7 @@ ROOT_FSTYPE=""
 ROOT_SUBVOL=""
 TARGET_LVM_VG=""
 TARGET_LUKS_MAPPER=""
+# shellcheck disable=SC2034
 TARGET_BOOT_MODE=""
 
 ESP_DEV=""
@@ -425,11 +426,46 @@ get_active_vgs() {
 }
 
 # ==================================================
+# Select an LVM volume group
+# ==================================================
+
+select_lvm_vg() {
+    local selection
+    local i=1
+    local vg
+
+    ((${#LVM_VGS[@]} > 0)) || return 1
+
+    log "LVM volume groups available for target selection:"
+    for vg in "${LVM_VGS[@]}"; do
+        printf '  [%d] %s\n' "$i" "$vg"
+        ((i++))
+    done
+
+    if ((${#LVM_VGS[@]} == 1)); then
+        selection=1
+    else
+        read -r -p "Select target LVM volume group [1-${#LVM_VGS[@]}]: " selection
+    fi
+
+    if ! [[ "$selection" =~ ^[0-9]+$ ]] ||
+       ((selection < 1 || selection > ${#LVM_VGS[@]})); then
+        warn "Invalid LVM volume group selection."
+        return 1
+    fi
+
+    TARGET_LVM_VG="${LVM_VGS[$((selection - 1))]}"
+    log "Selected LVM volume group: $TARGET_LVM_VG"
+    return 0
+}
+
+# ==================================================
 # LVM activation
 # ==================================================
 
 activate_lvm() {
     local target_vg="${1:-}"
+    local vg_active
 
     require_commands vgscan vgchange vgs lvs || return 1
 
@@ -438,12 +474,18 @@ activate_lvm() {
 
     if [[ -n "$target_vg" ]]; then
         log "Activating only the selected LVM volume group: $target_vg"
-        if ! vgchange --available y "$target_vg" >/dev/null 2>&1; then
+        vg_active="$(vgs --noheadings --options vg_active "$target_vg" 2>/dev/null |
+            sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | head -n1)"
+
+        if [[ "$vg_active" != "active" ]] &&
+           ! vgchange --available y "$target_vg" >/dev/null 2>&1; then
             warn "Failed to activate LVM volume group: $target_vg"
             return 1
         fi
 
-        ACTIVATED_VGS+=("$target_vg")
+        if [[ "$vg_active" != "active" ]]; then
+            ACTIVATED_VGS+=("$target_vg")
+        fi
         detect_lvm || return 1
         [[ -n "$TARGET_LVM_VG" ]] || TARGET_LVM_VG="$target_vg"
 
@@ -661,6 +703,14 @@ set_root() {
         if [[ "$base_name" == *"/"* ]]; then
             TARGET_LVM_VG="${base_name%%/*}"
         fi
+    fi
+
+    if [[ -z "$TARGET_LVM_VG" ]] && command -v lvs >/dev/null 2>&1; then
+        TARGET_LVM_VG="$(
+            lvs --noheadings --options vg_name --select "lv_path=$ROOT_DEV" 2>/dev/null |
+                sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+                head -n1
+        )"
     fi
 
     if [[ -z "$TARGET_LVM_VG" ]] && [[ "$ROOT_DEV" == /dev/mapper/* ]]; then
@@ -1117,6 +1167,7 @@ mount_esp() {
 
     if ! is_mounted_path "$target"; then
         warn "ESP mount verification failed."
+        umount --recursive "$target" 2>/dev/null || true
         return 1
     fi
 
@@ -1210,6 +1261,7 @@ reset_target_state() {
     ROOT_SUBVOL=""
     TARGET_LVM_VG=""
     TARGET_LUKS_MAPPER=""
+    # shellcheck disable=SC2034
     TARGET_BOOT_MODE=""
 
     ESP_DEV=""
@@ -1276,20 +1328,45 @@ prepare_target() {
     fi
 
     # --------------------------------------------------
-    # Root selection
+    # Root selection and inactive LVM discovery
     # --------------------------------------------------
 
-    select_root_filesystem || {
-        warn "Unable to find a suitable target root filesystem."
-        cleanup_target_storage
-        return 1
-    }
+    detect_lvm || true
+
+    if ! select_root_filesystem; then
+        if ((${#LVM_VGS[@]} == 0)); then
+            warn "Unable to find a suitable target root filesystem."
+            cleanup_target_storage
+            return 1
+        fi
+
+        select_lvm_vg || {
+            warn "Unable to select a target LVM volume group."
+            cleanup_target_storage
+            return 1
+        }
+
+        activate_lvm "$TARGET_LVM_VG" || {
+            warn "LVM activation failed for selected volume group: $TARGET_LVM_VG"
+            cleanup_target_storage
+            return 1
+        }
+
+        select_root_filesystem || {
+            warn "Unable to find a root filesystem in selected volume group."
+            cleanup_target_storage
+            return 1
+        }
+    fi
 
     # --------------------------------------------------
     # LVM activation for the selected target only
     # --------------------------------------------------
 
-    if [[ -n "$TARGET_LVM_VG" ]] && command -v vgchange >/dev/null 2>&1 && command -v vgs >/dev/null 2>&1; then
+    if [[ -n "$TARGET_LVM_VG" ]] &&
+       command -v vgchange >/dev/null 2>&1 &&
+       command -v vgs >/dev/null 2>&1 &&
+       ! printf '%s\n' "${ACTIVATED_VGS[@]}" | grep -qxF "$TARGET_LVM_VG"; then
         activate_lvm "$TARGET_LVM_VG" || {
             warn "LVM activation failed for selected volume group: $TARGET_LVM_VG"
             cleanup_target_storage
@@ -1368,4 +1445,3 @@ prepare_target() {
 
     return 0
 }
-

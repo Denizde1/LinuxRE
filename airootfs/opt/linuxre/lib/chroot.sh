@@ -97,7 +97,7 @@ cleanup_chroot_mounts() {
         [[ -n "$mountpoint_path" ]] || continue
         if mountpoint -q "$mountpoint_path"; then
             log "Unmounting chroot runtime mount: $mountpoint_path"
-            umount "$mountpoint_path" 2>/dev/null || true
+            umount --recursive "$mountpoint_path" 2>/dev/null || true
         fi
     done
 
@@ -116,10 +116,16 @@ bind_chroot_runtime_mount() {
         return 0
     fi
 
-    if ! mount --bind "$source" "$target" 2>/dev/null; then
+    if ! mount --rbind "$source" "$target" 2>/dev/null; then
         warn "Failed to bind mount $source -> $target"
         return 1
     fi
+
+    mount --make-rslave "$target" 2>/dev/null || {
+        warn "Failed to make chroot mount private: $target"
+        umount --recursive "$target" 2>/dev/null || true
+        return 1
+    }
 
     CHROOT_RUNTIME_MOUNTS+=("$target")
     return 0
@@ -153,12 +159,15 @@ prepare_chroot() {
         mount_esp || return 1
     fi
 
-    prepare_dns || return 1
-
-    bind_chroot_runtime_mount /dev "$MNT/dev" || return 1
-    bind_chroot_runtime_mount /proc "$MNT/proc" || return 1
-    bind_chroot_runtime_mount /sys "$MNT/sys" || return 1
-    bind_chroot_runtime_mount /run "$MNT/run" || return 1
+    if ! prepare_dns ||
+       ! bind_chroot_runtime_mount /dev "$MNT/dev" ||
+       ! bind_chroot_runtime_mount /proc "$MNT/proc" ||
+       ! bind_chroot_runtime_mount /sys "$MNT/sys" ||
+       ! bind_chroot_runtime_mount /run "$MNT/run"; then
+        restore_dns || true
+        cleanup_chroot_mounts
+        return 1
+    fi
 
     ok "Chroot environment prepared."
 

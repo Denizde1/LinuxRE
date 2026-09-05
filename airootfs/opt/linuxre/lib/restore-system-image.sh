@@ -2,6 +2,11 @@
 
 set -uo pipefail
 
+if [[ "$EUID" -ne 0 ]]; then
+    echo "Error: Image restore must be run as root." >&2
+    exit 1
+fi
+
 echo "========================================"
 echo "       Restore System Image"
 echo "========================================"

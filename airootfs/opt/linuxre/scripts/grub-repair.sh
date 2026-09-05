@@ -23,8 +23,6 @@ require_commands \
     awk \
     sed \
     arch-chroot \
-    grub-install \
-    grub-mkconfig \
     || exit 1
 
 trap 'restore_dns; cleanup_target_storage; cleanup' EXIT
@@ -37,32 +35,6 @@ echo "╚═══════════════════════�
 echo
 
 log "Scanning for Arch Linux installations..."
-
-if ! detect_root_filesystems; then
-    die "No supported Linux root filesystems were found."
-    exit 1
-fi
-
-for i in "${!ROOTS[@]}"; do
-    dev="${ROOTS[$i]}"
-    echo "[$((i + 1))] $dev"
-    lsblk -no SIZE,FSTYPE,LABEL,PARTLABEL,MOUNTPOINTS "$dev" | sed 's/^/    /'
-    echo
-
-done
-
-while true; do
-    read -rp "Select Arch Linux root filesystem [1-${#ROOTS[@]}]: " choice
-    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ROOTS[@]} )); then
-        break
-    fi
-    echo "Invalid selection."
-done
-
-if ! set_root "${ROOTS[$((choice - 1))]}"; then
-    die "Unable to select the target root filesystem."
-    exit 1
-fi
 
 if ! prepare_target; then
     die "Failed to prepare the target system."
@@ -93,7 +65,17 @@ fi
 
 log "Repairing GRUB UEFI installation..."
 
-if ! linuxre_chroot "$MNT" grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=ArchLinux --recheck; then
+if ! linuxre_chroot "$MNT" command -v grub-install >/dev/null 2>&1 ||
+   ! linuxre_chroot "$MNT" command -v grub-mkconfig >/dev/null 2>&1; then
+    warn "GRUB repair commands are not installed in the target system."
+    exit 1
+fi
+
+if ! linuxre_chroot "$MNT" grub-install \
+    --target=x86_64-efi \
+    "--efi-directory=$ESP_MOUNT" \
+    --bootloader-id=ArchLinux \
+    --recheck; then
     warn "GRUB UEFI installation failed."
     exit 1
 fi

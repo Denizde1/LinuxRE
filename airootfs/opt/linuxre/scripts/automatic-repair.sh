@@ -22,6 +22,11 @@ write_repair_report() {
     local timestamp
     timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
+    mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null || {
+        warn "Unable to create repair report directory."
+        return 1
+    }
+
     {
         echo "LinuxRE Repair Report"
         echo "Timestamp: $timestamp"
@@ -35,11 +40,16 @@ write_repair_report() {
         echo "ESP: ${ESP_DEV:-unknown}"
         echo "ESP mount point: ${ESP_MOUNT:-n/a}"
         echo "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}"
-        echo "Bootloader: $(if [[ -x "$MNT/usr/bin/bootctl" ]]; then echo systemd-boot; elif linuxre_chroot "$MNT" pacman -Q grub >/dev/null 2>&1; then echo grub; else echo unknown; fi)"
+        echo "Bootloader: $(detect_target_bootloader)"
         echo "Filesystem status: ${filesystem_failed:-unknown}"
         echo "Repair status: ${repair_failed:-unknown}"
         echo "Final status: ${final_failed:-unknown}"
-    } > "$REPORT_FILE_PATH"
+    } > "$REPORT_FILE_PATH" || {
+        warn "Unable to write repair report: $REPORT_FILE_PATH"
+        return 1
+    }
+
+    chmod 600 "$REPORT_FILE_PATH" 2>/dev/null || true
 
     log "Repair report written to $REPORT_FILE_PATH"
 }

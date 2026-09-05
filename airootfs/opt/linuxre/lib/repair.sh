@@ -105,8 +105,39 @@ verify_target() {
     return 1
 }
 
-get_target_kernel_version() {
-    linuxre_chroot "$MNT" uname -r 2>/dev/null || true
+get_target_kernel_versions() {
+    local modules_dir
+
+    for modules_dir in "$MNT"/usr/lib/modules/*; do
+        [[ -d "$modules_dir" ]] || continue
+        basename "$modules_dir"
+    done | sort -V
+}
+
+detect_target_bootloader() {
+    local loader_conf=""
+    local systemd_boot_efi=""
+    local fallback_efi=""
+
+    if [[ -n "$ESP_MOUNT" ]]; then
+        loader_conf="$MNT$ESP_MOUNT/loader/loader.conf"
+        systemd_boot_efi="$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi"
+        fallback_efi="$MNT$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI"
+    fi
+
+    if [[ -f "$loader_conf" ]] &&
+       { [[ -f "$systemd_boot_efi" ]] || [[ -f "$fallback_efi" ]]; }; then
+        printf '%s\n' "systemd-boot"
+        return 0
+    fi
+
+    if [[ -f "$MNT/boot/grub/grub.cfg" ]] ||
+       [[ -f "$MNT$ESP_MOUNT/EFI/ArchLinux/grubx64.efi" ]]; then
+        printf '%s\n' "grub"
+        return 0
+    fi
+
+    printf '%s\n' "unknown"
 }
 
 # ==================================================
@@ -251,24 +282,25 @@ verify_kernel() {
             ;;
 
         classic)
-            kernel_version="$(get_target_kernel_version)"
-
-            if [[ -z "$kernel_version" ]]; then
-                warn "Unable to determine the running kernel version inside the target."
+            if ! get_target_kernel_versions | grep -q .; then
+                warn "No installed target kernel modules were found."
                 return 1
             fi
 
-            for candidate in \
-                "$MNT/boot/vmlinuz-$kernel_version" \
-                "$MNT$ESP_MOUNT/vmlinuz-$kernel_version" \
-                "$MNT/usr/lib/modules/$kernel_version/kernel/vmlinuz"; do
-                if [[ -f "$candidate" ]]; then
-                    ok "Kernel detected: $candidate"
-                    return 0
-                fi
-            done
+            while IFS= read -r kernel_version; do
+                for candidate in \
+                    "$MNT/boot/vmlinuz-$kernel_version" \
+                    "$MNT$ESP_MOUNT/vmlinuz-$kernel_version" \
+                    "$MNT/usr/lib/modules/$kernel_version/vmlinuz" \
+                    "$MNT/usr/lib/modules/$kernel_version/kernel/vmlinuz"; do
+                    if [[ -f "$candidate" ]]; then
+                        ok "Kernel detected: $candidate"
+                        return 0
+                    fi
+                done
+            done < <(get_target_kernel_versions)
 
-            warn "Kernel image for version $kernel_version was not found."
+            warn "No kernel image matched the installed target kernel modules."
             return 1
             ;;
 
@@ -311,25 +343,21 @@ verify_initramfs() {
             ;;
 
         classic)
-            kernel_version="$(get_target_kernel_version)"
-
-            if [[ -z "$kernel_version" ]]; then
-                warn "Unable to determine the target kernel version."
+            if ! get_target_kernel_versions | grep -q .; then
+                warn "No installed target kernel modules were found."
                 return 1
             fi
 
             for candidate in \
-                "$MNT/boot/initramfs-linux.img" \
-                "$MNT/boot/initramfs-linux-fallback.img" \
-                "$MNT$ESP_MOUNT/initramfs-linux.img" \
-                "$MNT$ESP_MOUNT/initramfs-linux-fallback.img"; do
+                "$MNT/boot"/initramfs-*.img \
+                "$MNT$ESP_MOUNT"/initramfs-*.img; do
                 if [[ -f "$candidate" ]]; then
                     ok "Initramfs detected: $candidate"
                     return 0
                 fi
             done
 
-            warn "No initramfs image for kernel $kernel_version was found."
+            warn "No initramfs image was found for the installed target kernels."
             return 1
             ;;
 
@@ -357,13 +385,23 @@ verify_systemd() {
         return 1
     fi
 
-    if linuxre_chroot "$MNT" systemd-analyze verify /etc/systemd/system >/dev/null 2>&1; then
-        ok "systemd unit configuration appears valid."
-        return 0
+    local unit
+    local found=0
+
+    while IFS= read -r unit; do
+        found=1
+        if ! linuxre_chroot "$MNT" systemd-analyze verify "${unit#"$MNT"}" >/dev/null 2>&1; then
+            warn "systemd unit validation reported issues: ${unit#"$MNT"}"
+            return 1
+        fi
+    done < <(find "$MNT/etc/systemd/system" -type f \( -name '*.service' -o -name '*.socket' -o -name '*.target' \) 2>/dev/null)
+
+    if ((found == 0)); then
+        log "No regular systemd units found under /etc/systemd/system."
     fi
 
-    warn "systemd unit validation reported issues."
-    return 1
+    ok "systemd unit configuration appears valid."
+    return 0
 }
 
 # ==================================================
@@ -376,12 +414,12 @@ verify_systemd_boot() {
 
     if ! is_uefi_system; then
         warn "UEFI firmware not detected; systemd-boot is not applicable in this environment."
-        return 1
+        return 0
     fi
 
     if [[ ! -x "$MNT/usr/bin/bootctl" ]]; then
-        warn "bootctl was not found."
-        return 1
+        log "bootctl was not found; systemd-boot is not configured."
+        return 0
     fi
 
     if [[ -z "$ESP_DEV" ]] || [[ -z "$ESP_MOUNT" ]]; then
@@ -392,6 +430,13 @@ verify_systemd_boot() {
     local loader_conf="$MNT$ESP_MOUNT/loader/loader.conf"
     local efi_boot="$MNT$ESP_MOUNT/EFI/systemd/systemd-bootx64.efi"
     local fallback_efi="$MNT$ESP_MOUNT/EFI/BOOT/BOOTX64.EFI"
+
+    if [[ ! -f "$loader_conf" ]] &&
+       [[ ! -f "$efi_boot" ]] &&
+       [[ ! -f "$fallback_efi" ]]; then
+        log "systemd-boot is not configured on the target ESP."
+        return 0
+    fi
 
     if [[ -f "$loader_conf" ]]; then
         ok "systemd-boot loader configuration exists: $loader_conf"
@@ -592,7 +637,7 @@ repair_systemd_boot() {
 
     if ! is_uefi_system; then
         warn "UEFI firmware not detected; systemd-boot repair is not applicable in this environment."
-        return 1
+        return 0
     fi
 
     if [[ -z "$ESP_DEV" ]] || [[ -z "$ESP_MOUNT" ]]; then
