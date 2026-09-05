@@ -12,7 +12,28 @@ source /opt/linuxre/lib/target.sh
 # ==================================================
 
 prepare_dns() {
+
     local target_resolv="$MNT/etc/resolv.conf"
+    local backup="$TMP/resolv.conf.backup"
+    local missing="$TMP/resolv.conf.backup.missing"
+
+    if [[ ! -d "$MNT/etc" ]]; then
+        warn "Target /etc directory does not exist."
+        return 1
+    fi
+
+    if [[ -e "$backup" || -L "$backup" || -e "$missing" ]]; then
+        return 0
+    fi
+
+    if [[ -e "$target_resolv" || -L "$target_resolv" ]]; then
+        if ! cp -a "$target_resolv" "$backup"; then
+            warn "Failed to back up target resolv.conf."
+            return 1
+        fi
+    else
+        : > "$missing"
+    fi
 
     if [[ ! -e /etc/resolv.conf ]]; then
         warn "Live environment has no /etc/resolv.conf."
@@ -27,6 +48,38 @@ prepare_dns() {
     fi
 
     ok "DNS configuration prepared."
+
+    return 0
+}
+
+# ==================================================
+# Restore DNS
+# ==================================================
+
+restore_dns() {
+
+    local target_resolv="$MNT/etc/resolv.conf"
+    local backup="$TMP/resolv.conf.backup"
+    local missing="$TMP/resolv.conf.backup.missing"
+
+    if [[ -e "$backup" || -L "$backup" ]]; then
+        rm -f "$target_resolv"
+
+        if ! mv "$backup" "$target_resolv"; then
+            warn "Failed to restore target resolv.conf."
+            return 1
+        fi
+
+        rm -f "$missing"
+
+        ok "Original DNS configuration restored."
+        return 0
+    fi
+
+    if [[ -e "$missing" ]]; then
+        rm -f "$target_resolv" "$missing"
+        return 0
+    fi
 
     return 0
 }
@@ -90,6 +143,7 @@ linuxre_chroot() {
 # ==================================================
 
 enter_chroot() {
+
     local status
 
     prepare_chroot || return 1
@@ -101,7 +155,10 @@ enter_chroot() {
     echo
 
     arch-chroot "$MNT"
+
     status=$?
+
+    restore_dns || true
 
     echo
 

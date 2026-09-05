@@ -57,10 +57,6 @@ require_commands() {
 # ==================================================
 
 cleanup() {
-    if [[ -d "$MNT" ]]; then
-        umount -R "$MNT" 2>/dev/null || true
-    fi
-
     if [[ -d "$TMP" ]]; then
         rm -rf "$TMP" 2>/dev/null || true
     fi

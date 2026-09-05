@@ -154,6 +154,7 @@ luks_mapper_name() {
 # ==================================================
 
 unlock_luks_device() {
+
     local dev="$1"
     local mapper_name
     local mapper
@@ -183,11 +184,6 @@ unlock_luks_device() {
     # Already unlocked before LinuxRE touched it.
     if [[ -b "$mapper" ]]; then
         log "LUKS device already unlocked: $mapper"
-
-        if [[ ! " ${OPENED_LUKS[*]} " =~ [[:space:]]${mapper}[[:space:]] ]]; then
-            OPENED_LUKS+=("$mapper")
-        fi
-
         return 0
     fi
 
@@ -206,7 +202,6 @@ unlock_luks_device() {
     OPENED_LUKS+=("$mapper")
 
     ok "Unlocked: $mapper"
-
     return 0
 }
 
@@ -675,10 +670,11 @@ detect_btrfs_subvolume() {
 }
 
 # ==================================================
-# Mount root
+# Mount root filesystem
 # ==================================================
 
 mount_root() {
+
     mkdir -p "$MNT"
 
     if is_mounted_path "$MNT"; then
@@ -732,12 +728,114 @@ mount_root() {
             ;;
     esac
 
+    # The mount succeeded, so cleanup must now know that
+    # LinuxRE owns this mount.
+    TARGET_ROOT_MOUNTED=1
+
     if ! is_mounted_path "$MNT"; then
         warn "Root filesystem mount verification failed."
+
+        if umount "$MNT" 2>/dev/null; then
+            TARGET_ROOT_MOUNTED=0
+        else
+            warn "Failed to clean up root filesystem mount."
+        fi
+
         return 1
     fi
 
-    TARGET_ROOT_MOUNTED=1
+    return 0
+}
+
+# ==================================================
+# Mount ESP
+# ==================================================
+
+# shellcheck disable=SC2329
+mount_esp() {
+
+    [[ -n "$ESP_DEV" ]] || {
+        warn "ESP device is not set."
+        return 1
+    }
+
+    [[ -n "$ESP_MOUNT" ]] || {
+        warn "ESP mount point is not set."
+        return 1
+    }
+
+    local target="$MNT$ESP_MOUNT"
+    local existing_target
+    local existing_source
+
+    mkdir -p "$target"
+
+    # Already mounted at target.
+    if is_mounted_path "$target"; then
+        existing_source="$(
+            findmnt \
+                -rn \
+                -o SOURCE \
+                --target "$target" \
+                2>/dev/null |
+                head -n1
+        )"
+
+        if [[ "$existing_source" == "$ESP_DEV" ]]; then
+            log "ESP already mounted: $target"
+            return 0
+        fi
+
+        warn "ESP mount point is already occupied: $target"
+        return 1
+    fi
+
+    # ESP may already be mounted somewhere else.
+    if is_mounted_device "$ESP_DEV"; then
+        existing_target="$(
+            findmnt \
+                -rn \
+                -S "$ESP_DEV" \
+                -o TARGET \
+                2>/dev/null |
+                head -n1
+        )"
+
+        if [[ -n "$existing_target" ]]; then
+            log "ESP is already mounted at: $existing_target"
+
+            # If it is already under our target root, reuse it.
+            if [[ "$existing_target" == "$target" ]]; then
+                return 0
+            fi
+
+            warn "ESP is already mounted elsewhere: $existing_target"
+            return 1
+        fi
+    fi
+
+    log "Mounting ESP: $ESP_DEV -> $ESP_MOUNT"
+
+    if ! mount "$ESP_DEV" "$target"; then
+        warn "Failed to mount ESP."
+        return 1
+    fi
+
+    # The mount succeeded, so cleanup must now know that
+    # LinuxRE owns this mount.
+    TARGET_ESP_MOUNTED=1
+
+    if ! is_mounted_path "$target"; then
+        warn "ESP mount verification failed."
+
+        if umount "$target" 2>/dev/null; then
+            TARGET_ESP_MOUNTED=0
+        else
+            warn "Failed to clean up ESP mount."
+        fi
+
+        return 1
+    fi
 
     return 0
 }

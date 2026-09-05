@@ -137,12 +137,15 @@ verify_package_integrity() {
         return 1
     }
 
-    if echo "$output" | grep -qE '[1-9][0-9]* (missing|altered) files'; then
+    if printf '%s\n' "$output" |
+        grep -qE '[1-9][0-9]* (missing|altered) files?'; then
+
         warn "Package integrity problems were detected."
         return 1
     fi
 
     ok "Package integrity check completed successfully."
+
     return 0
 }
 
@@ -151,7 +154,6 @@ verify_package_integrity() {
 # ==================================================
 
 repair_package_integrity() {
-
     local output
     local packages
     local package
@@ -164,17 +166,17 @@ repair_package_integrity() {
 
     log "Checking installed packages..."
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-        warn "Package integrity check failed."
-        return 1
-    }
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
 
     packages="$(
-        echo "$output" |
-        awk -F: '/[1-9][0-9]* (missing|altered) files/ {
-            print $1
-        }' |
+        printf '%s\n' "$output" |
+        awk -F: '
+            /[1-9][0-9]* (missing|altered) files?/ {
+                print $1
+            }
+        ' |
         sed 's/[[:space:]]*$//' |
+        sed '/^$/d' |
         sort -u
     )"
 
@@ -184,6 +186,7 @@ repair_package_integrity() {
     fi
 
     echo
+
     log "Packages requiring repair:"
 
     while IFS= read -r package; do
@@ -200,7 +203,6 @@ repair_package_integrity() {
 
         if ! linuxre_chroot "$MNT" \
             pacman -S --noconfirm "$package"; then
-
             warn "Failed to reinstall $package."
             return 1
         fi

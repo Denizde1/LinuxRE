@@ -47,10 +47,7 @@ require_commands \
 # ==================================================
 
 # cleanup() is provided by common.sh.
-trap cleanup EXIT
-
-# ==================================================
-# Target helpers
+trap 'restore_dns; cleanup_target_storage; cleanup' EXIT
 # ==================================================
 
 target_is_mounted() {
@@ -73,20 +70,40 @@ ensure_target() {
 }
 
 unmount_target() {
-    if ! target_is_mounted; then
-        return 0
+    local failed=0
+
+    # Unmount only resources mounted by LinuxRE.
+    # Never recursively unmount arbitrary mounts below /mnt.
+
+    if (( TARGET_ESP_MOUNTED )) &&
+       [[ -n "$ESP_MOUNT" ]] &&
+       mountpoint -q "$MNT$ESP_MOUNT"; then
+
+        log "Unmounting target ESP..."
+
+        if umount "$MNT$ESP_MOUNT"; then
+            TARGET_ESP_MOUNTED=0
+        else
+            warn "Failed to unmount target ESP."
+            failed=1
+        fi
     fi
 
-    log "Unmounting target filesystem..."
+    if (( TARGET_ROOT_MOUNTED )) &&
+       mountpoint -q "$MNT"; then
 
-    if ! umount -R "$MNT"; then
-        warn "Failed to unmount target filesystem."
-        return 1
+        log "Unmounting target filesystem..."
+
+        if umount "$MNT"; then
+            TARGET_ROOT_MOUNTED=0
+        else
+            warn "Failed to unmount target filesystem."
+            failed=1
+        fi
     fi
 
-    return 0
+    return "$failed"
 }
-
 # ==================================================
 # Header
 # ==================================================
