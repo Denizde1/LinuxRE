@@ -31,5 +31,9 @@ assert_equal FAIL "$(calculate_overall_status PASS 1)" \
     "later final verification failure cannot be overwritten by repair success"
 assert_equal FAIL "$(calculate_overall_status NOT_REQUIRED 1)" \
     "report generation cannot turn a final failure into success"
+assert_equal FAIL "$(calculate_overall_status UNKNOWN 0)" \
+    "unknown repair result cannot produce success"
+assert_equal FAIL "$(calculate_overall_status NOT_RUN 0)" \
+    "unverified repair result cannot produce success"
 
 exit "$failures"

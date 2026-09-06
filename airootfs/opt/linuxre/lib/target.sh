@@ -780,7 +780,10 @@ detect_btrfs_subvolume() {
         )
     fi
 
-    umount "$tmp" 2>/dev/null || true
+    if ! umount "$tmp" 2>/dev/null; then
+        warn "Failed to unmount temporary Btrfs inspection mount: $tmp"
+        return 1
+    fi
 
     if [[ -z "$ROOT_SUBVOL" ]]; then
         warn "Unable to determine Btrfs root subvolume. Falling back to the top-level subvolume."
@@ -1210,13 +1213,13 @@ cleanup_target_storage() {
        [[ -n "$ESP_MOUNT" ]] &&
        is_mounted_path "$MNT$ESP_MOUNT"; then
 
-        if ! umount "$MNT$ESP_MOUNT" 2>/dev/null; then
+        if umount "$MNT$ESP_MOUNT" 2>/dev/null; then
+            TARGET_ESP_MOUNTED=0
+        else
             warn "Failed to unmount target ESP during cleanup: $MNT$ESP_MOUNT"
             failed=1
         fi
     fi
-
-    TARGET_ESP_MOUNTED=0
 
     # --------------------------------------------------
     # Unmount root only if LinuxRE mounted it.
@@ -1225,55 +1228,61 @@ cleanup_target_storage() {
     if ((TARGET_ROOT_MOUNTED)) &&
        is_mounted_path "$MNT"; then
 
-        if ! umount "$MNT" 2>/dev/null; then
+        if umount "$MNT" 2>/dev/null; then
+            TARGET_ROOT_MOUNTED=0
+        else
             warn "Failed to unmount target filesystem during cleanup: $MNT"
             failed=1
         fi
     fi
-
-    TARGET_ROOT_MOUNTED=0
 
     # --------------------------------------------------
     # Deactivate only VGs activated by LinuxRE.
     # --------------------------------------------------
 
     if command -v vgchange >/dev/null 2>&1; then
+        local remaining_vgs=()
         for vg in "${ACTIVATED_VGS[@]}"; do
             [[ -n "$vg" ]] || continue
 
             log "Deactivating LVM volume group: $vg"
 
-            if ! vgchange \
+            if vgchange \
                 --available n \
                 "$vg" \
                 >/dev/null 2>&1; then
+                :
+            else
                 warn "Failed to deactivate LVM volume group during cleanup: $vg"
+                remaining_vgs+=("$vg")
                 failed=1
             fi
         done
+        ACTIVATED_VGS=("${remaining_vgs[@]}")
     fi
-
-    ACTIVATED_VGS=()
 
     # --------------------------------------------------
     # Close only LUKS devices opened by LinuxRE.
     # --------------------------------------------------
 
     if command -v cryptsetup >/dev/null 2>&1; then
+        local remaining_mappers=()
         for mapper in "${OPENED_LUKS[@]}"; do
             [[ -b "$mapper" ]] || continue
 
             log "Closing LUKS mapper: $mapper"
 
-            if ! cryptsetup luksClose "$mapper" \
+            if cryptsetup luksClose "$mapper" \
                 >/dev/null 2>&1; then
+                :
+            else
                 warn "Failed to close LUKS mapper during cleanup: $mapper"
+                remaining_mappers+=("$mapper")
                 failed=1
             fi
         done
+        OPENED_LUKS=("${remaining_mappers[@]}")
     fi
-
-    OPENED_LUKS=()
 
     return "$failed"
 }
