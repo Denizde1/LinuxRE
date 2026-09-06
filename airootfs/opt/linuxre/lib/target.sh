@@ -35,6 +35,7 @@ ACTIVATED_VGS=()
 # Track mounts created by LinuxRE.
 TARGET_ROOT_MOUNTED=0
 TARGET_ESP_MOUNTED=0
+TARGET_INSPECTION_MOUNTS=()
 
 # ==================================================
 # Supported filesystems
@@ -179,6 +180,29 @@ is_mounted_device() {
 
 is_mounted_path() {
     mountpoint -q "$1"
+}
+
+track_inspection_mount() {
+    local mountpoint_path="$1"
+
+    [[ -n "$mountpoint_path" ]] || return 1
+
+    if ! printf '%s\n' "${TARGET_INSPECTION_MOUNTS[@]}" |
+        grep -qxF "$mountpoint_path"; then
+        TARGET_INSPECTION_MOUNTS+=("$mountpoint_path")
+    fi
+}
+
+untrack_inspection_mount() {
+    local mountpoint_path="$1"
+    local remaining=()
+    local current
+
+    for current in "${TARGET_INSPECTION_MOUNTS[@]}"; do
+        [[ "$current" == "$mountpoint_path" ]] || remaining+=("$current")
+    done
+
+    TARGET_INSPECTION_MOUNTS=("${remaining[@]}")
 }
 
 # ==================================================
@@ -610,7 +634,14 @@ looks_like_linux_root() {
         result=0
     fi
 
-    umount "$tmp" 2>/dev/null || true
+    track_inspection_mount "$tmp"
+
+    if umount "$tmp" 2>/dev/null; then
+        untrack_inspection_mount "$tmp"
+    else
+        warn "Failed to unmount temporary root inspection mount: $tmp"
+        return 1
+    fi
 
     return "$result"
 }
@@ -777,7 +808,14 @@ detect_btrfs_subvolume() {
         )
     fi
 
-    umount "$tmp" 2>/dev/null || true
+    track_inspection_mount "$tmp"
+
+    if umount "$tmp" 2>/dev/null; then
+        untrack_inspection_mount "$tmp"
+    else
+        warn "Failed to unmount temporary Btrfs inspection mount: $tmp"
+        return 1
+    fi
 
     if [[ -z "$ROOT_SUBVOL" ]]; then
         warn "Unable to determine Btrfs root subvolume. Falling back to the top-level subvolume."
@@ -1195,8 +1233,14 @@ mount_esp() {
 # ==================================================
 
 cleanup_target_storage() {
+    local failed=0
     local mapper
     local vg
+    local mountpoint_path
+    local remaining_luks=()
+    local remaining_vgs=()
+    local remaining_mounts=()
+    local storage_busy=0
 
     # --------------------------------------------------
     # Unmount ESP only if LinuxRE mounted it.
@@ -1206,10 +1250,15 @@ cleanup_target_storage() {
        [[ -n "$ESP_MOUNT" ]] &&
        is_mounted_path "$MNT$ESP_MOUNT"; then
 
-        umount "$MNT$ESP_MOUNT" 2>/dev/null || true
+        if umount "$MNT$ESP_MOUNT" 2>/dev/null; then
+            TARGET_ESP_MOUNTED=0
+        else
+            warn "Failed to unmount target ESP: $MNT$ESP_MOUNT"
+            failed=1
+        fi
+    elif ((TARGET_ESP_MOUNTED)); then
+        TARGET_ESP_MOUNTED=0
     fi
-
-    TARGET_ESP_MOUNTED=0
 
     # --------------------------------------------------
     # Unmount root only if LinuxRE mounted it.
@@ -1218,50 +1267,128 @@ cleanup_target_storage() {
     if ((TARGET_ROOT_MOUNTED)) &&
        is_mounted_path "$MNT"; then
 
-        umount "$MNT" 2>/dev/null || true
+        if umount "$MNT" 2>/dev/null; then
+            TARGET_ROOT_MOUNTED=0
+        else
+            warn "Failed to unmount target root: $MNT"
+            failed=1
+        fi
+    elif ((TARGET_ROOT_MOUNTED)); then
+        TARGET_ROOT_MOUNTED=0
     fi
 
-    TARGET_ROOT_MOUNTED=0
+    # --------------------------------------------------
+    # Unmount temporary inspection mounts owned by LinuxRE.
+    # --------------------------------------------------
+
+    for mountpoint_path in "${TARGET_INSPECTION_MOUNTS[@]}"; do
+        [[ -n "$mountpoint_path" ]] || continue
+
+        if ! is_mounted_path "$mountpoint_path"; then
+            continue
+        fi
+
+        log "Unmounting temporary inspection mount: $mountpoint_path"
+
+        if umount "$mountpoint_path" 2>/dev/null; then
+            continue
+        fi
+
+        warn "Failed to unmount temporary inspection mount: $mountpoint_path"
+        remaining_mounts+=("$mountpoint_path")
+        failed=1
+    done
+
+    TARGET_INSPECTION_MOUNTS=("${remaining_mounts[@]}")
+
+    if is_mounted_path "$MNT"; then
+        storage_busy=1
+    fi
+
+    if [[ -n "$ESP_MOUNT" ]] &&
+       is_mounted_path "$MNT$ESP_MOUNT"; then
+        storage_busy=1
+    fi
+
+    for mountpoint_path in "${TARGET_INSPECTION_MOUNTS[@]}"; do
+        if is_mounted_path "$mountpoint_path"; then
+            storage_busy=1
+            break
+        fi
+    done
+
+    if ((storage_busy)); then
+        warn "Storage resources remain mounted; deferring LVM and LUKS cleanup."
+        remaining_vgs=("${ACTIVATED_VGS[@]}")
+        remaining_luks=("${OPENED_LUKS[@]}")
+        failed=1
+    fi
 
     # --------------------------------------------------
     # Deactivate only VGs activated by LinuxRE.
     # --------------------------------------------------
 
-    if command -v vgchange >/dev/null 2>&1; then
+    if ((storage_busy)); then
+        :
+    elif ((${#ACTIVATED_VGS[@]} > 0)) &&
+       ! command -v vgchange >/dev/null 2>&1; then
+        warn "Unable to deactivate LVM volume groups: vgchange is unavailable."
+        remaining_vgs=("${ACTIVATED_VGS[@]}")
+        failed=1
+    elif command -v vgchange >/dev/null 2>&1; then
         for vg in "${ACTIVATED_VGS[@]}"; do
             [[ -n "$vg" ]] || continue
 
             log "Deactivating LVM volume group: $vg"
 
-            vgchange \
+            if vgchange \
                 --available n \
                 "$vg" \
-                >/dev/null 2>&1 ||
-                true
+                >/dev/null 2>&1; then
+                continue
+            fi
+
+            warn "Failed to deactivate LVM volume group: $vg"
+            remaining_vgs+=("$vg")
+            failed=1
         done
     fi
 
-    ACTIVATED_VGS=()
+    ACTIVATED_VGS=("${remaining_vgs[@]}")
 
     # --------------------------------------------------
     # Close only LUKS devices opened by LinuxRE.
     # --------------------------------------------------
 
-    if command -v cryptsetup >/dev/null 2>&1; then
+    if ((storage_busy)); then
+        :
+    elif ((${#OPENED_LUKS[@]} > 0)) &&
+       ! command -v cryptsetup >/dev/null 2>&1; then
+        warn "Unable to close LUKS devices: cryptsetup is unavailable."
+        remaining_luks=("${OPENED_LUKS[@]}")
+        failed=1
+    elif command -v cryptsetup >/dev/null 2>&1; then
         for mapper in "${OPENED_LUKS[@]}"; do
-            [[ -b "$mapper" ]] || continue
+            if [[ ! -b "$mapper" ]]; then
+                continue
+            fi
 
             log "Closing LUKS mapper: $mapper"
 
-            cryptsetup luksClose "$mapper" \
-                >/dev/null 2>&1 ||
-                true
+            if cryptsetup luksClose "$mapper" \
+                >/dev/null 2>&1; then
+                continue
+            fi
+
+            warn "Failed to close LUKS mapper: $mapper"
+            remaining_luks+=("$mapper")
+            failed=1
         done
     fi
 
-    OPENED_LUKS=()
+    OPENED_LUKS=("${remaining_luks[@]}")
 
-    return 0
+    return "$failed"
 }
 
 # ==================================================
@@ -1294,6 +1421,7 @@ reset_target_state() {
 
     TARGET_ROOT_MOUNTED=0
     TARGET_ESP_MOUNTED=0
+    TARGET_INSPECTION_MOUNTS=()
 }
 
 # ==================================================

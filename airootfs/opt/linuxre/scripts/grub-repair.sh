@@ -25,7 +25,7 @@ require_commands \
     arch-chroot \
     || exit 1
 
-trap 'restore_dns; cleanup_target_storage; cleanup' EXIT
+trap cleanup_on_exit EXIT
 
 clear
 

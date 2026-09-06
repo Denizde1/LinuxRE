@@ -62,7 +62,8 @@ while true; do
                     ;;
 
                 btrfs)
-                    sudo btrfs check "$device"
+                    echo "Btrfs check is read-only; automatic Btrfs repair is disabled."
+                    sudo btrfs check --readonly "$device"
                     ;;
 
                 xfs)

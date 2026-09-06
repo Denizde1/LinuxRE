@@ -20,7 +20,13 @@ source /opt/linuxre/lib/fsck.sh
 write_repair_report() {
     local status="${1:-FAIL}"
     local timestamp
+    local failed_stages=""
     timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+    (( filesystem_failed != 0 )) && failed_stages+="filesystem-check "
+    (( repair_failed != 0 )) && failed_stages+="repair "
+    (( final_failed != 0 )) && failed_stages+="final-verification "
+    [[ -n "$failed_stages" ]] || failed_stages="none"
 
     mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null || {
         warn "Unable to create repair report directory."
@@ -44,12 +50,17 @@ write_repair_report() {
         echo "Filesystem status: ${filesystem_failed:-unknown}"
         echo "Repair status: ${repair_failed:-unknown}"
         echo "Final status: ${final_failed:-unknown}"
+        echo "Failed stages: $failed_stages"
+        echo "Filesystem check exit status: ${fsck_status:-unknown}"
+        echo "Final filesystem check exit status: ${final_fsck_status:-n/a}"
     } > "$REPORT_FILE_PATH" || {
         warn "Unable to write repair report: $REPORT_FILE_PATH"
         return 1
     }
 
-    chmod 600 "$REPORT_FILE_PATH" 2>/dev/null || true
+    if ! chmod 600 "$REPORT_FILE_PATH" 2>/dev/null; then
+        warn "Unable to restrict repair report permissions: $REPORT_FILE_PATH"
+    fi
 
     log "Repair report written to $REPORT_FILE_PATH"
 }
@@ -84,7 +95,7 @@ require_commands \
 # ==================================================
 
 # cleanup() is provided by common.sh.
-trap 'restore_dns; cleanup_target_storage; cleanup' EXIT
+trap cleanup_on_exit EXIT
 # ==================================================
 
 target_is_mounted() {
@@ -162,6 +173,7 @@ echo
 
 if ! prepare_target; then
     die "Automatic Repair couldn't prepare a supported Linux installation."
+    exit 1
 fi
 
 # ==================================================
@@ -205,6 +217,7 @@ fi
 # Restore the target environment for the remaining diagnostics.
 if ! ensure_target; then
     die "Automatic Repair couldn't restore the target after filesystem diagnosis."
+    exit 1
 fi
 
 # ==================================================
@@ -466,12 +479,17 @@ TARGET_BOOT_MODE="$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)"
 
 if (( repair_failed == 0 && final_failed == 0 )); then
     echo "Automatic Repair successfully repaired your PC."
-    write_repair_report "PASS"
+    if ! write_repair_report "PASS"; then
+        warn "Repair completed but the required report could not be written."
+        exit 1
+    fi
     sleep 5
     exit 0
 fi
 
 echo "Automatic Repair couldn't repair your PC."
-write_repair_report "FAIL"
+if ! write_repair_report "FAIL"; then
+    warn "Repair failed and the failure report could not be written."
+fi
 sleep 5
 exit 1

@@ -16,6 +16,7 @@ while true; do
     echo "  7) USB Devices"
     echo "  8) Log Viewer"
     echo "  9) System Repair"
+    echo " 10) LinuxRE Read-Only Diagnostics"
     echo
     echo "  0) Back"
     echo
@@ -32,6 +33,7 @@ while true; do
         7) clear; lsusb; read -rp "Press Enter to continue..." _ ;;
         8) sudo bash /opt/linuxre/tools/logs.sh ;;
         9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
+        10) bash /opt/linuxre/tools/diagnostics.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac
