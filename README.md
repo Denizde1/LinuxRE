@@ -4,3 +4,5 @@ A basic recovery environment for Arch Linux. It can also be used to install Arch
 LinuxRE is UEFI-only (v0.2+).
 
 Version 0.7 focuses on recovery reliability and practical tooling: explicit repair states, final verification, safer package-integrity repair, read-only system diagnostics, network diagnostics, configuration backup export, and non-destructive status regression tests.
+
+The recovery toolkit also includes read-only storage inspection for device identity, filesystem usage, encryption/LVM state, and mounted Btrfs subvolumes.

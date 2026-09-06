@@ -17,6 +17,7 @@ while true; do
     echo "  8) NVMe Information"
     echo "  9) Mount Manager"
     echo "  10) System Image Recovery"
+    echo "  11) Storage Inspector [READ ONLY]"
     echo
     echo "  0) Back"
     echo
@@ -51,6 +52,7 @@ while true; do
 
         9) bash /opt/linuxre/tools/mountmanager.sh ;; 
         10) bash /opt/linuxre/tools/disk-imaging.sh ;;
+        11) clear; bash /opt/linuxre/tools/storage-info.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

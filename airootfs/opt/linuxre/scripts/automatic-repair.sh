@@ -42,6 +42,11 @@ write_repair_report() {
         echo "ESP mount point: ${ESP_MOUNT:-n/a}"
         echo "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}"
         echo "Bootloader: $(detect_target_bootloader)"
+        echo "LinuxRE version: v0.7"
+        echo "Kernel status: ${FINAL_KERNEL_STATUS:-NOT_RUN}"
+        echo "Initramfs/UKI status: ${FINAL_INITRAMFS_STATUS:-NOT_RUN}"
+        echo "systemd status: ${FINAL_SYSTEMD_STATUS:-NOT_RUN}"
+        echo "systemd-boot status: ${FINAL_SYSTEMD_BOOT_STATUS:-NOT_RUN}"
         echo "Initial filesystem check: ${INITIAL_FILESYSTEM_STATUS:-NOT_RUN}"
         echo "Initial package integrity: ${INITIAL_PACKAGE_INTEGRITY_STATUS:-NOT_RUN}"
         echo "Repair attempted: ${REPAIR_ATTEMPTED:-NO}"
@@ -350,7 +355,9 @@ fi
 # ==================================================
 
 if ensure_target; then
-    if ! verify_kernel >/dev/null 2>&1; then
+    if verify_kernel >/dev/null 2>&1; then
+        :
+    else
         REPAIR_ATTEMPTED=YES
         log "Repairing kernel..."
 
@@ -368,7 +375,9 @@ fi
 # ==================================================
 
 if ensure_target; then
-    if ! verify_initramfs >/dev/null 2>&1; then
+    if verify_initramfs >/dev/null 2>&1; then
+        :
+    else
         REPAIR_ATTEMPTED=YES
         log "Repairing initramfs / UKI..."
 
@@ -386,7 +395,9 @@ fi
 # ==================================================
 
 if ensure_target; then
-    if ! verify_systemd >/dev/null 2>&1; then
+    if verify_systemd >/dev/null 2>&1; then
+        :
+    else
         REPAIR_ATTEMPTED=YES
         log "Repairing systemd..."
 
@@ -404,7 +415,9 @@ fi
 # ==================================================
 
 if ensure_target; then
-    if ! verify_systemd_boot >/dev/null 2>&1; then
+    if verify_systemd_boot >/dev/null 2>&1; then
+        :
+    else
         REPAIR_ATTEMPTED=YES
         log "Repairing systemd-boot..."
 
@@ -490,10 +503,30 @@ else
         FINAL_PACKAGE_INTEGRITY_STATUS=FAIL
         final_failed=1
     fi
-    verify_kernel || final_failed=1
-    verify_initramfs || final_failed=1
-    verify_systemd || final_failed=1
-    verify_systemd_boot || final_failed=1
+    if verify_kernel; then
+        FINAL_KERNEL_STATUS=PASS
+    else
+        FINAL_KERNEL_STATUS=FAIL
+        final_failed=1
+    fi
+    if verify_initramfs; then
+        FINAL_INITRAMFS_STATUS=PASS
+    else
+        FINAL_INITRAMFS_STATUS=FAIL
+        final_failed=1
+    fi
+    if verify_systemd; then
+        FINAL_SYSTEMD_STATUS=PASS
+    else
+        FINAL_SYSTEMD_STATUS=FAIL
+        final_failed=1
+    fi
+    if verify_systemd_boot; then
+        FINAL_SYSTEMD_BOOT_STATUS=PASS
+    else
+        FINAL_SYSTEMD_BOOT_STATUS=FAIL
+        final_failed=1
+    fi
 fi
 
 echo

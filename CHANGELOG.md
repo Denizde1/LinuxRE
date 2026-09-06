@@ -7,5 +7,6 @@
 - Added non-destructive regression coverage for final-status propagation.
 - Added read-only system information and diagnostic scan screens.
 - Added network diagnostics and configuration/package-list backup export.
+- Added a read-only storage inspector for device, filesystem, LVM, encryption, and Btrfs information.
 - Preserved safe target, mount, Btrfs, ESP, kernel, initramfs/UKI, systemd, and systemd-boot handling.
 - Updated the Recovery Center version to v0.7.

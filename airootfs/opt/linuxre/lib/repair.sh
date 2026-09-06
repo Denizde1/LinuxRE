@@ -5,6 +5,8 @@ set -uo pipefail
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/common.sh
 # shellcheck disable=SC1091
+source /opt/linuxre/lib/package.sh
+# shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/chroot.sh
@@ -191,8 +193,7 @@ verify_package_integrity() {
         return 1
     }
 
-    if printf '%s\n' "$output" |
-        grep -qE '[1-9][0-9]* (missing|altered) files?'; then
+    if printf '%s\n' "$output" | package_integrity_has_problems; then
 
         warn "Package integrity problems were detected."
         return 1
@@ -224,17 +225,7 @@ repair_package_integrity() {
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
     check_status=$?
 
-    packages="$(
-        printf '%s\n' "$output" |
-        awk -F: '
-            /^[[:alnum:]@._+:-]+:.*[1-9][0-9]* (missing|altered) files?/ {
-                print $1
-            }
-        ' |
-        sed 's/[[:space:]]*$//' |
-        sed '/^$/d' |
-        sort -u
-    )"
+    packages="$(printf '%s\n' "$output" | extract_damaged_packages)"
 
     if [[ -z "$packages" ]]; then
         if (( check_status != 0 )); then
