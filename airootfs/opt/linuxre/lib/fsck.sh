@@ -34,15 +34,17 @@ check_filesystem() {
     case "$fstype" in
         ext2|ext3|ext4)
             fsck -f -n "$device"
+            return $?
             ;;
 
         btrfs)
-            btrfs check "$device"
+            btrfs check --readonly "$device"
             return $?
             ;;
 
         f2fs)
             fsck.f2fs -n "$device"
+            return $?
             ;;
 
         vfat|exfat)

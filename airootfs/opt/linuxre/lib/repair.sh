@@ -5,6 +5,8 @@ set -uo pipefail
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/common.sh
 # shellcheck disable=SC1091
+source /opt/linuxre/lib/package.sh
+# shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/chroot.sh
@@ -185,15 +187,29 @@ verify_package_integrity() {
     log "Checking package integrity..."
 
     local output
+    local check_status
+    local packages
+    PACKAGE_INTEGRITY_PACKAGES=""
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-        warn "Package integrity check failed."
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    check_status=$?
+    printf '%s\n' "$output" >> "$REPORT_LOG_PATH" 2>/dev/null || true
+
+    packages="$(printf '%s\n' "$output" | extract_damaged_packages)"
+    # shellcheck disable=SC2034
+    PACKAGE_INTEGRITY_PACKAGES="$packages"
+
+    if (( check_status != 0 )); then
+        if [[ -n "$packages" ]]; then
+            warn "Package integrity problems were detected."
+        else
+            warn "Package integrity could not be inspected; pacman -Qkk exited with status $check_status."
+        fi
         return 1
-    }
+    fi
 
-    if printf '%s\n' "$output" |
-        grep -qE '[1-9][0-9]* (missing|altered) files?'; then
-
+    if [[ -n "$packages" ]] ||
+       printf '%s\n' "$output" | package_integrity_has_problems; then
         warn "Package integrity problems were detected."
         return 1
     fi
@@ -209,6 +225,7 @@ verify_package_integrity() {
 
 repair_package_integrity() {
     local output
+    local check_status
     local packages
     local package
 
@@ -221,20 +238,19 @@ repair_package_integrity() {
     log "Checking installed packages..."
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    check_status=$?
+    printf '%s\n' "$output" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 
-    packages="$(
-        printf '%s\n' "$output" |
-        awk -F: '
-            /[1-9][0-9]* (missing|altered) files?/ {
-                print $1
-            }
-        ' |
-        sed 's/[[:space:]]*$//' |
-        sed '/^$/d' |
-        sort -u
-    )"
+    packages="$(printf '%s\n' "$output" | extract_damaged_packages)"
+    # shellcheck disable=SC2034
+    PACKAGE_INTEGRITY_PACKAGES="$packages"
 
     if [[ -z "$packages" ]]; then
+        if (( check_status != 0 )); then
+            warn "Package integrity could not be inspected; pacman -Qkk exited with status $check_status."
+            return 1
+        fi
+
         ok "No packages require repair."
         return 0
     fi
