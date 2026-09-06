@@ -71,3 +71,31 @@ cleanup() {
         rm -rf "$TMP" 2>/dev/null || true
     fi
 }
+
+cleanup_on_exit() {
+    local primary_status=$?
+    local cleanup_status=0
+
+    if declare -F restore_dns >/dev/null 2>&1 &&
+       ! restore_dns; then
+        cleanup_status=1
+    fi
+
+    if declare -F cleanup_chroot_mounts >/dev/null 2>&1 &&
+       ! cleanup_chroot_mounts; then
+        cleanup_status=1
+    fi
+
+    if declare -F cleanup_target_storage >/dev/null 2>&1 &&
+       ! cleanup_target_storage; then
+        cleanup_status=1
+    fi
+
+    cleanup || cleanup_status=1
+
+    if (( primary_status != 0 )); then
+        return "$primary_status"
+    fi
+
+    return "$cleanup_status"
+}

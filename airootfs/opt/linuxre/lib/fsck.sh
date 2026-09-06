@@ -33,21 +33,31 @@ check_filesystem() {
 
     case "$fstype" in
         ext2|ext3|ext4)
+            require_commands fsck || return 2
             fsck -f -n "$device"
             ;;
 
         btrfs)
-            btrfs check "$device"
+            require_commands btrfs || return 2
+            # btrfs check is explicitly read-only; automatic Btrfs repair
+            # is intentionally unsupported by LinuxRE.
+            btrfs check --readonly "$device"
             return $?
             ;;
 
         f2fs)
+            require_commands fsck.f2fs || return 2
             fsck.f2fs -n "$device"
             ;;
 
-        vfat|exfat)
-            log "Filesystem check is available, but automatic repair is disabled for $fstype."
-            return 0
+        vfat)
+            require_commands fsck.fat || return 2
+            fsck.fat -n "$device"
+            ;;
+
+        exfat)
+            require_commands fsck.exfat || return 2
+            fsck.exfat -n "$device"
             ;;
 
         xfs)
@@ -90,17 +100,26 @@ repair_filesystem() {
 
     case "$fstype" in
         ext2|ext3|ext4)
+            require_commands fsck || return 1
             fsck -fy "$device"
             repair_status=$?
             ;;
 
         f2fs)
+            require_commands fsck.f2fs || return 1
             fsck.f2fs -a "$device"
             repair_status=$?
             ;;
 
-        vfat|exfat)
-            warn "Automatic repair is disabled for $fstype."
+        vfat)
+            require_commands fsck.fat || return 1
+            warn "Automatic repair is disabled for vfat."
+            return 1
+            ;;
+
+        exfat)
+            require_commands fsck.exfat || return 1
+            warn "Automatic repair is disabled for exfat."
             return 1
             ;;
 

@@ -77,8 +77,12 @@ restore_dns() {
     fi
 
     if [[ -e "$missing" ]]; then
-        rm -f "$target_resolv" "$missing"
-        return 0
+        if rm -f "$target_resolv" "$missing"; then
+            return 0
+        fi
+
+        warn "Failed to remove temporary DNS state."
+        return 1
     fi
 
     return 0
@@ -87,7 +91,9 @@ restore_dns() {
 CHROOT_RUNTIME_MOUNTS=()
 
 cleanup_chroot_mounts() {
+    local failed=0
     local mountpoint_path
+    local remaining=()
 
     if ((${#CHROOT_RUNTIME_MOUNTS[@]} == 0)); then
         return 0
@@ -97,12 +103,16 @@ cleanup_chroot_mounts() {
         [[ -n "$mountpoint_path" ]] || continue
         if mountpoint -q "$mountpoint_path"; then
             log "Unmounting chroot runtime mount: $mountpoint_path"
-            umount --recursive "$mountpoint_path" 2>/dev/null || true
+            if ! umount --recursive "$mountpoint_path" 2>/dev/null; then
+                warn "Failed to unmount chroot runtime mount: $mountpoint_path"
+                remaining+=("$mountpoint_path")
+                failed=1
+            fi
         fi
     done
 
-    CHROOT_RUNTIME_MOUNTS=()
-    return 0
+    CHROOT_RUNTIME_MOUNTS=("${remaining[@]}")
+    return "$failed"
 }
 
 bind_chroot_runtime_mount() {
@@ -213,6 +223,7 @@ linuxre_chroot() {
 enter_chroot() {
 
     local status
+    local cleanup_status=0
 
     prepare_chroot || return 1
 
@@ -226,8 +237,8 @@ enter_chroot() {
 
     status=$?
 
-    restore_dns || true
-    cleanup_chroot_mounts || true
+    restore_dns || cleanup_status=1
+    cleanup_chroot_mounts || cleanup_status=1
 
     echo
 
@@ -237,5 +248,9 @@ enter_chroot() {
         warn "arch-chroot exited with status $status."
     fi
 
-    return "$status"
+    if (( status != 0 )); then
+        return "$status"
+    fi
+
+    return "$cleanup_status"
 }

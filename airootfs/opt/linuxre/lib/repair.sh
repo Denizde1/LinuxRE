@@ -180,21 +180,37 @@ verify_pacman() {
 # Package integrity verification
 # ==================================================
 
+parse_pacman_integrity_output() {
+    awk '
+        {
+            line = $0
+            sub(/^[[:space:]]*warning:[[:space:]]*/, "", line)
+
+            if (line ~ /^[^:[:space:]]+:[[:space:]]+[0-9]+[[:space:]]+total[[:space:]]+files?,[[:space:]]+[1-9][0-9]*[[:space:]]+(missing|altered)[[:space:]]+files?([[:space:]]|$)/) {
+                sub(/:.*/, "", line)
+                print line
+            }
+        }
+    ' | sort -u
+}
+
 verify_package_integrity() {
 
     log "Checking package integrity..."
 
     local output
+    local packages
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
         warn "Package integrity check failed."
         return 1
     }
 
-    if printf '%s\n' "$output" |
-        grep -qE '[1-9][0-9]* (missing|altered) files?'; then
+    packages="$(printf '%s\n' "$output" | parse_pacman_integrity_output)"
 
-        warn "Package integrity problems were detected."
+    if [[ -n "$packages" ]]; then
+
+        warn "Package integrity problems were detected in: $packages"
         return 1
     fi
 
@@ -220,18 +236,14 @@ repair_package_integrity() {
 
     log "Checking installed packages..."
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
+        warn "Package integrity check failed; repair package list is unavailable."
+        return 1
+    }
 
     packages="$(
         printf '%s\n' "$output" |
-        awk -F: '
-            /[1-9][0-9]* (missing|altered) files?/ {
-                print $1
-            }
-        ' |
-        sed 's/[[:space:]]*$//' |
-        sed '/^$/d' |
-        sort -u
+        parse_pacman_integrity_output
     )"
 
     if [[ -z "$packages" ]]; then
@@ -264,6 +276,21 @@ repair_package_integrity() {
         ok "$package repaired."
     done <<< "$packages"
 
+    log "Verifying package integrity after reinstall..."
+
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
+        warn "Post-repair package integrity check failed."
+        return 1
+    }
+
+    packages="$(printf '%s\n' "$output" | parse_pacman_integrity_output)"
+
+    if [[ -n "$packages" ]]; then
+        warn "Package integrity problems remain after repair: $packages"
+        return 1
+    fi
+
+    ok "Package integrity verified after repair."
     return 0
 }
 
