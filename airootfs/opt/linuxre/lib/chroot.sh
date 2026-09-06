@@ -61,23 +61,38 @@ restore_dns() {
     local target_resolv="$MNT/etc/resolv.conf"
     local backup="$TMP/resolv.conf.backup"
     local missing="$TMP/resolv.conf.backup.missing"
+    local failed=0
 
     if [[ -e "$backup" || -L "$backup" ]]; then
-        rm -f "$target_resolv"
+        if ! rm -f "$target_resolv"; then
+            warn "Failed to remove temporary target resolv.conf."
+            failed=1
+        fi
 
-        if ! mv "$backup" "$target_resolv"; then
+        if ((failed == 0)) && ! mv "$backup" "$target_resolv"; then
             warn "Failed to restore target resolv.conf."
+            failed=1
+        fi
+
+        if [[ -e "$missing" || -L "$missing" ]] &&
+           ! rm -f "$missing"; then
+            warn "Failed to remove DNS backup marker."
+            failed=1
+        fi
+
+        if ((failed == 0)); then
+            ok "Original DNS configuration restored."
+        fi
+
+        return "$failed"
+    fi
+
+    if [[ -e "$missing" || -L "$missing" ]]; then
+        if ! rm -f "$target_resolv" "$missing"; then
+            warn "Failed to remove temporary DNS configuration."
             return 1
         fi
 
-        rm -f "$missing"
-
-        ok "Original DNS configuration restored."
-        return 0
-    fi
-
-    if [[ -e "$missing" ]]; then
-        rm -f "$target_resolv" "$missing"
         return 0
     fi
 
@@ -87,22 +102,39 @@ restore_dns() {
 CHROOT_RUNTIME_MOUNTS=()
 
 cleanup_chroot_mounts() {
+    local failed=0
     local mountpoint_path
 
     if ((${#CHROOT_RUNTIME_MOUNTS[@]} == 0)); then
         return 0
     fi
 
+    if ! command -v mountpoint >/dev/null 2>&1 ||
+       ! command -v umount >/dev/null 2>&1; then
+        warn "Required chroot cleanup commands are unavailable."
+        return 1
+    fi
+
     for mountpoint_path in "${CHROOT_RUNTIME_MOUNTS[@]}"; do
         [[ -n "$mountpoint_path" ]] || continue
-        if mountpoint -q "$mountpoint_path"; then
-            log "Unmounting chroot runtime mount: $mountpoint_path"
-            umount --recursive "$mountpoint_path" 2>/dev/null || true
+
+        if ! mountpoint -q "$mountpoint_path"; then
+            CHROOT_RUNTIME_MOUNTS=("${CHROOT_RUNTIME_MOUNTS[@]/$mountpoint_path}")
+            continue
+        fi
+
+        log "Unmounting chroot runtime mount: $mountpoint_path"
+
+        if umount --recursive "$mountpoint_path" 2>/dev/null &&
+           ! mountpoint -q "$mountpoint_path"; then
+            CHROOT_RUNTIME_MOUNTS=("${CHROOT_RUNTIME_MOUNTS[@]/$mountpoint_path}")
+        else
+            warn "Failed to unmount chroot runtime mount: $mountpoint_path"
+            failed=1
         fi
     done
 
-    CHROOT_RUNTIME_MOUNTS=()
-    return 0
+    return "$failed"
 }
 
 bind_chroot_runtime_mount() {
@@ -121,11 +153,14 @@ bind_chroot_runtime_mount() {
         return 1
     fi
 
-    mount --make-rslave "$target" 2>/dev/null || {
+    if ! mount --make-rslave "$target" 2>/dev/null; then
         warn "Failed to make chroot mount private: $target"
-        umount --recursive "$target" 2>/dev/null || true
+        if ! umount --recursive "$target" 2>/dev/null ||
+           mountpoint -q "$target"; then
+            warn "Failed to clean up chroot runtime mount: $target"
+        fi
         return 1
-    }
+    fi
 
     CHROOT_RUNTIME_MOUNTS+=("$target")
     return 0
@@ -137,6 +172,7 @@ bind_chroot_runtime_mount() {
 
 prepare_chroot() {
     local esp_mounted_here=0
+    local cleanup_failed=0
 
     if [[ ! -d "$MNT/etc" ]]; then
         warn "Target filesystem is not mounted."
@@ -169,14 +205,22 @@ prepare_chroot() {
        ! bind_chroot_runtime_mount /proc "$MNT/proc" ||
        ! bind_chroot_runtime_mount /sys "$MNT/sys" ||
        ! bind_chroot_runtime_mount /run "$MNT/run"; then
-        restore_dns || true
-        cleanup_chroot_mounts
+        restore_dns || cleanup_failed=1
+        cleanup_chroot_mounts || cleanup_failed=1
         if (( esp_mounted_here )) &&
            [[ -n "$ESP_MOUNT" ]] &&
            mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
+            if ! umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null ||
+               mountpoint -q "$MNT$ESP_MOUNT"; then
+                warn "Failed to clean up target ESP mount."
+                cleanup_failed=1
+            else
+                TARGET_ESP_MOUNTED=0
+            fi
         fi
+
+        ((cleanup_failed == 0)) ||
+            warn "Chroot preparation cleanup failed."
         return 1
     fi
 
@@ -213,6 +257,7 @@ linuxre_chroot() {
 enter_chroot() {
 
     local status
+    local cleanup_failed=0
 
     prepare_chroot || return 1
 
@@ -226,8 +271,8 @@ enter_chroot() {
 
     status=$?
 
-    restore_dns || true
-    cleanup_chroot_mounts || true
+    restore_dns || cleanup_failed=1
+    cleanup_chroot_mounts || cleanup_failed=1
 
     echo
 
@@ -235,6 +280,13 @@ enter_chroot() {
         ok "Exited chroot successfully."
     else
         warn "arch-chroot exited with status $status."
+    fi
+
+    if ((cleanup_failed != 0)); then
+        warn "Chroot cleanup failed."
+        if ((status == 0)); then
+            status=1
+        fi
     fi
 
     return "$status"

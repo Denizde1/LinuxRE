@@ -9,6 +9,7 @@ set -uo pipefail
 check_filesystem() {
     local device="${1:-}"
     local fstype="${2:-}"
+    local verification_status
 
     if [[ ! -b "$device" ]]; then
         warn "Invalid block device: $device"
@@ -34,6 +35,7 @@ check_filesystem() {
     case "$fstype" in
         ext2|ext3|ext4)
             fsck -f -n "$device"
+            verification_status=$?
             ;;
 
         btrfs)
@@ -43,11 +45,17 @@ check_filesystem() {
 
         f2fs)
             fsck.f2fs -n "$device"
+            verification_status=$?
             ;;
 
-        vfat|exfat)
-            log "Filesystem check is available, but automatic repair is disabled for $fstype."
-            return 0
+        vfat)
+            fsck.fat -n "$device"
+            verification_status=$?
+            ;;
+
+        exfat)
+            fsck.exfat -n "$device"
+            verification_status=$?
             ;;
 
         xfs)
@@ -65,6 +73,8 @@ check_filesystem() {
             return 2
             ;;
     esac
+
+    return "$verification_status"
 }
 
 # ==================================================

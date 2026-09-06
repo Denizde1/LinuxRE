@@ -27,31 +27,34 @@ write_repair_report() {
         return 1
     }
 
-    {
-        echo "LinuxRE Repair Report"
-        echo "Timestamp: $timestamp"
-        echo "Status: $status"
-        echo "Target root: ${ROOT_DEV:-unknown}"
-        echo "Root UUID: ${ROOT_UUID:-unknown}"
-        echo "Root filesystem: ${ROOT_FSTYPE:-unknown}"
-        echo "Btrfs subvolume: ${ROOT_SUBVOL:-n/a}"
-        echo "LUKS mapper: ${TARGET_LUKS_MAPPER:-n/a}"
-        echo "LVM VG: ${TARGET_LVM_VG:-n/a}"
-        echo "ESP: ${ESP_DEV:-unknown}"
-        echo "ESP mount point: ${ESP_MOUNT:-n/a}"
-        echo "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}"
-        echo "Bootloader: $(detect_target_bootloader)"
-        echo "Filesystem status: ${filesystem_failed:-unknown}"
-        echo "Repair status: ${repair_failed:-unknown}"
-        echo "Final status: ${final_failed:-unknown}"
-    } > "$REPORT_FILE_PATH" || {
+    if ! printf '%s\n' \
+        "LinuxRE Repair Report" \
+        "Timestamp: $timestamp" \
+        "Status: $status" \
+        "Target root: ${ROOT_DEV:-unknown}" \
+        "Root UUID: ${ROOT_UUID:-unknown}" \
+        "Root filesystem: ${ROOT_FSTYPE:-unknown}" \
+        "Btrfs subvolume: ${ROOT_SUBVOL:-n/a}" \
+        "LUKS mapper: ${TARGET_LUKS_MAPPER:-n/a}" \
+        "LVM VG: ${TARGET_LVM_VG:-n/a}" \
+        "ESP: ${ESP_DEV:-unknown}" \
+        "ESP mount point: ${ESP_MOUNT:-n/a}" \
+        "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}" \
+        "Bootloader: $(detect_target_bootloader)" \
+        "Filesystem status: ${filesystem_failed:-unknown}" \
+        "Repair status: ${repair_failed:-unknown}" \
+        "Final status: ${final_failed:-unknown}" \
+        > "$REPORT_FILE_PATH"; then
         warn "Unable to write repair report: $REPORT_FILE_PATH"
         return 1
-    }
+    fi
 
-    chmod 600 "$REPORT_FILE_PATH" 2>/dev/null || true
+    if ! chmod 600 "$REPORT_FILE_PATH" 2>/dev/null; then
+        warn "Unable to apply private permissions to repair report: $REPORT_FILE_PATH"
+    fi
 
     log "Repair report written to $REPORT_FILE_PATH"
+    return 0
 }
 
 # ==================================================
@@ -84,7 +87,30 @@ require_commands \
 # ==================================================
 
 # cleanup() is provided by common.sh.
-trap 'restore_dns; cleanup_target_storage; cleanup' EXIT
+CLEANUP_DONE=0
+
+cleanup_on_exit() {
+    local status=$?
+    local cleanup_failed=0
+
+    if ((CLEANUP_DONE != 0)); then
+        return "$status"
+    fi
+
+    restore_dns || cleanup_failed=1
+    cleanup_target_storage || cleanup_failed=1
+    cleanup || cleanup_failed=1
+
+    CLEANUP_DONE=1
+
+    if ((status == 0 && cleanup_failed != 0)); then
+        status=1
+    fi
+
+    return "$status"
+}
+
+trap cleanup_on_exit EXIT
 # ==================================================
 
 target_is_mounted() {
@@ -160,8 +186,12 @@ echo
 # Initial target preparation
 # ==================================================
 
-if ! prepare_target; then
+prepare_target
+prepare_status=$?
+
+if ((prepare_status != 0)); then
     die "Automatic Repair couldn't prepare a supported Linux installation."
+    exit "$prepare_status"
 fi
 
 # ==================================================
@@ -203,8 +233,12 @@ else
 fi
 
 # Restore the target environment for the remaining diagnostics.
-if ! ensure_target; then
+ensure_target
+restore_target_status=$?
+
+if ((restore_target_status != 0)); then
     die "Automatic Repair couldn't restore the target after filesystem diagnosis."
+    exit "$restore_target_status"
 fi
 
 # ==================================================
@@ -464,14 +498,26 @@ echo
 
 TARGET_BOOT_MODE="$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)"
 
+cleanup_on_exit
+cleanup_status=$?
+
+if ((cleanup_status != 0)); then
+    repair_failed=1
+fi
+
 if (( repair_failed == 0 && final_failed == 0 )); then
     echo "Automatic Repair successfully repaired your PC."
-    write_repair_report "PASS"
+    if ! write_repair_report "PASS"; then
+        warn "Automatic Repair could not produce the required PASS report."
+        exit 1
+    fi
     sleep 5
     exit 0
 fi
 
 echo "Automatic Repair couldn't repair your PC."
-write_repair_report "FAIL"
+if ! write_repair_report "FAIL"; then
+    warn "Automatic Repair could not write its failure report."
+fi
 sleep 5
 exit 1

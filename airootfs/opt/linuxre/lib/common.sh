@@ -12,8 +12,15 @@ TMP="${TMP:-$MNT/.linuxre}"
 REPORT_LOG_PATH="${REPORT_LOG_PATH:-/var/log/linuxre-repair.log}"
 REPORT_FILE_PATH="${REPORT_FILE_PATH:-/var/log/linuxre-repair-report.txt}"
 
-mkdir -p "$(dirname "$REPORT_LOG_PATH")" 2>/dev/null || true
-mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null || true
+if ! mkdir -p "$(dirname "$REPORT_LOG_PATH")" 2>/dev/null; then
+    printf '[ERROR] Unable to create log directory: %s\n' \
+        "$(dirname "$REPORT_LOG_PATH")" >&2
+fi
+
+if ! mkdir -p "$(dirname "$REPORT_FILE_PATH")" 2>/dev/null; then
+    printf '[ERROR] Unable to create report directory: %s\n' \
+        "$(dirname "$REPORT_FILE_PATH")" >&2
+fi
 
 log() {
     printf '[*] %s\n' "$*"
@@ -68,6 +75,11 @@ require_commands() {
 
 cleanup() {
     if [[ -d "$TMP" ]]; then
-        rm -rf "$TMP" 2>/dev/null || true
+        if ! rm -rf "$TMP" 2>/dev/null; then
+            warn "Failed to remove temporary directory: $TMP"
+            return 1
+        fi
     fi
+
+    return 0
 }
