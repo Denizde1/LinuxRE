@@ -610,7 +610,10 @@ looks_like_linux_root() {
         result=0
     fi
 
-    umount "$tmp" 2>/dev/null || true
+    if ! umount "$tmp" 2>/dev/null; then
+        warn "Failed to unmount temporary Btrfs inspection mount: $tmp"
+        return 1
+    fi
 
     return "$result"
 }
@@ -1197,6 +1200,7 @@ mount_esp() {
 cleanup_target_storage() {
     local mapper
     local vg
+    local failed=0
 
     # --------------------------------------------------
     # Unmount ESP only if LinuxRE mounted it.
@@ -1206,7 +1210,10 @@ cleanup_target_storage() {
        [[ -n "$ESP_MOUNT" ]] &&
        is_mounted_path "$MNT$ESP_MOUNT"; then
 
-        umount "$MNT$ESP_MOUNT" 2>/dev/null || true
+        if ! umount "$MNT$ESP_MOUNT" 2>/dev/null; then
+            warn "Failed to unmount target ESP during cleanup: $MNT$ESP_MOUNT"
+            failed=1
+        fi
     fi
 
     TARGET_ESP_MOUNTED=0
@@ -1218,7 +1225,10 @@ cleanup_target_storage() {
     if ((TARGET_ROOT_MOUNTED)) &&
        is_mounted_path "$MNT"; then
 
-        umount "$MNT" 2>/dev/null || true
+        if ! umount "$MNT" 2>/dev/null; then
+            warn "Failed to unmount target filesystem during cleanup: $MNT"
+            failed=1
+        fi
     fi
 
     TARGET_ROOT_MOUNTED=0
@@ -1233,11 +1243,13 @@ cleanup_target_storage() {
 
             log "Deactivating LVM volume group: $vg"
 
-            vgchange \
+            if ! vgchange \
                 --available n \
                 "$vg" \
-                >/dev/null 2>&1 ||
-                true
+                >/dev/null 2>&1; then
+                warn "Failed to deactivate LVM volume group during cleanup: $vg"
+                failed=1
+            fi
         done
     fi
 
@@ -1253,15 +1265,17 @@ cleanup_target_storage() {
 
             log "Closing LUKS mapper: $mapper"
 
-            cryptsetup luksClose "$mapper" \
-                >/dev/null 2>&1 ||
-                true
+            if ! cryptsetup luksClose "$mapper" \
+                >/dev/null 2>&1; then
+                warn "Failed to close LUKS mapper during cleanup: $mapper"
+                failed=1
+            fi
         done
     fi
 
     OPENED_LUKS=()
 
-    return 0
+    return "$failed"
 }
 
 # ==================================================

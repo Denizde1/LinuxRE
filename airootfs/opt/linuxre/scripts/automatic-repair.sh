@@ -13,9 +13,10 @@ source /opt/linuxre/lib/chroot.sh
 
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/repair.sh
-
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/fsck.sh
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/status.sh
 
 write_repair_report() {
     local status="${1:-FAIL}"
@@ -41,9 +42,16 @@ write_repair_report() {
         echo "ESP mount point: ${ESP_MOUNT:-n/a}"
         echo "Boot mode: ${TARGET_BOOT_MODE:-$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)}"
         echo "Bootloader: $(detect_target_bootloader)"
-        echo "Filesystem status: ${filesystem_failed:-unknown}"
-        echo "Repair status: ${repair_failed:-unknown}"
-        echo "Final status: ${final_failed:-unknown}"
+        echo "Initial filesystem check: ${INITIAL_FILESYSTEM_STATUS:-NOT_RUN}"
+        echo "Initial package integrity: ${INITIAL_PACKAGE_INTEGRITY_STATUS:-NOT_RUN}"
+        echo "Repair attempted: ${REPAIR_ATTEMPTED:-NO}"
+        echo "Repair result: ${REPAIR_RESULT:-NOT_REQUIRED}"
+        echo "Final filesystem verification: ${FINAL_FILESYSTEM_STATUS:-NOT_RUN}"
+        echo "Final package integrity: ${FINAL_PACKAGE_INTEGRITY_STATUS:-NOT_RUN}"
+        echo "Overall status: $status"
+        echo "Filesystem status code: ${filesystem_failed:-unknown}"
+        echo "Repair status code: ${repair_failed:-unknown}"
+        echo "Final status code: ${final_failed:-unknown}"
     } > "$REPORT_FILE_PATH" || {
         warn "Unable to write repair report: $REPORT_FILE_PATH"
         return 1
@@ -162,6 +170,7 @@ echo
 
 if ! prepare_target; then
     die "Automatic Repair couldn't prepare a supported Linux installation."
+    exit 1
 fi
 
 # ==================================================
@@ -171,6 +180,13 @@ fi
 echo
 echo "Checking filesystem..."
 echo
+
+INITIAL_FILESYSTEM_STATUS=NOT_RUN
+INITIAL_PACKAGE_INTEGRITY_STATUS=NOT_RUN
+FINAL_FILESYSTEM_STATUS=NOT_RUN
+FINAL_PACKAGE_INTEGRITY_STATUS=NOT_RUN
+REPAIR_ATTEMPTED=NO
+REPAIR_RESULT=NOT_REQUIRED
 
 filesystem_failed=0
 fsck_status=0
@@ -187,24 +203,32 @@ else
 
     case "$fsck_status" in
         0)
+            INITIAL_FILESYSTEM_STATUS=PASS
             ok "Filesystem check completed successfully."
             ;;
 
         1)
+            INITIAL_FILESYSTEM_STATUS=FAIL
             warn "Filesystem errors were detected."
             filesystem_failed=1
             ;;
 
         *)
+            INITIAL_FILESYSTEM_STATUS=FAIL
             warn "Filesystem check could not be completed."
             filesystem_failed=1
             ;;
     esac
 fi
 
+if (( filesystem_failed != 0 )) && [[ "$INITIAL_FILESYSTEM_STATUS" == NOT_RUN ]]; then
+    INITIAL_FILESYSTEM_STATUS=FAIL
+fi
+
 # Restore the target environment for the remaining diagnostics.
 if ! ensure_target; then
     die "Automatic Repair couldn't restore the target after filesystem diagnosis."
+    exit 1
 fi
 
 # ==================================================
@@ -223,7 +247,12 @@ fi
 
 verify_target || failed=1
 verify_pacman || failed=1
-verify_package_integrity || failed=1
+if verify_package_integrity; then
+    INITIAL_PACKAGE_INTEGRITY_STATUS=PASS
+else
+    INITIAL_PACKAGE_INTEGRITY_STATUS=FAIL
+    failed=1
+fi
 verify_kernel || failed=1
 verify_initramfs || failed=1
 verify_systemd || failed=1
@@ -275,6 +304,7 @@ repair_failed=0
 # ==================================================
 
 if (( filesystem_failed != 0 )); then
+    REPAIR_ATTEMPTED=YES
     log "Preparing filesystem repair..."
 
     # Filesystem repair must operate on an unmounted filesystem.
@@ -306,13 +336,12 @@ fi
 if ! ensure_target; then
     warn "Target is unavailable. Skipping remaining repairs."
     repair_failed=1
-else
-    if ! verify_package_integrity >/dev/null 2>&1; then
-        log "Repairing package integrity..."
+elif [[ "$INITIAL_PACKAGE_INTEGRITY_STATUS" == FAIL ]]; then
+    REPAIR_ATTEMPTED=YES
+    log "Repairing package integrity..."
 
-        if ! repair_package_integrity; then
-            repair_failed=1
-        fi
+    if ! repair_package_integrity; then
+        repair_failed=1
     fi
 fi
 
@@ -322,6 +351,7 @@ fi
 
 if ensure_target; then
     if ! verify_kernel >/dev/null 2>&1; then
+        REPAIR_ATTEMPTED=YES
         log "Repairing kernel..."
 
         if ! repair_kernel; then
@@ -339,6 +369,7 @@ fi
 
 if ensure_target; then
     if ! verify_initramfs >/dev/null 2>&1; then
+        REPAIR_ATTEMPTED=YES
         log "Repairing initramfs / UKI..."
 
         if ! repair_initramfs; then
@@ -356,6 +387,7 @@ fi
 
 if ensure_target; then
     if ! verify_systemd >/dev/null 2>&1; then
+        REPAIR_ATTEMPTED=YES
         log "Repairing systemd..."
 
         if ! repair_systemd; then
@@ -373,6 +405,7 @@ fi
 
 if ensure_target; then
     if ! verify_systemd_boot >/dev/null 2>&1; then
+        REPAIR_ATTEMPTED=YES
         log "Repairing systemd-boot..."
 
         if ! repair_systemd_boot; then
@@ -420,9 +453,11 @@ if (( filesystem_failed != 0 )); then
         final_fsck_status=$?
 
         if (( final_fsck_status != 0 )); then
+            FINAL_FILESYSTEM_STATUS=FAIL
             warn "Filesystem verification failed."
             final_failed=1
         else
+            FINAL_FILESYSTEM_STATUS=PASS
             ok "Final filesystem verification completed successfully."
         fi
     fi
@@ -449,7 +484,12 @@ if ! ensure_target; then
 else
     verify_target || final_failed=1
     verify_pacman || final_failed=1
-    verify_package_integrity || final_failed=1
+    if verify_package_integrity; then
+        FINAL_PACKAGE_INTEGRITY_STATUS=PASS
+    else
+        FINAL_PACKAGE_INTEGRITY_STATUS=FAIL
+        final_failed=1
+    fi
     verify_kernel || final_failed=1
     verify_initramfs || final_failed=1
     verify_systemd || final_failed=1
@@ -464,7 +504,17 @@ echo
 
 TARGET_BOOT_MODE="$(if is_uefi_system; then echo uefi; else echo non-uefi; fi)"
 
-if (( repair_failed == 0 && final_failed == 0 )); then
+if [[ "$REPAIR_ATTEMPTED" == YES ]]; then
+    if (( repair_failed == 0 )); then
+        REPAIR_RESULT=PASS
+    else
+        REPAIR_RESULT=FAIL
+    fi
+fi
+
+OVERALL_STATUS="$(calculate_overall_status "$REPAIR_RESULT" "$final_failed")"
+
+if [[ "$OVERALL_STATUS" == PASS ]]; then
     echo "Automatic Repair successfully repaired your PC."
     write_repair_report "PASS"
     sleep 5

@@ -9,7 +9,7 @@ while true; do
     echo
     echo "  1) btop"
     echo "  2) fastfetch"
-    echo "  3) System Information"
+    echo "  3) System Information [READ ONLY]"
     echo "  4) Hardware Information"
     echo "  5) Sensors / Temperatures"
     echo "  6) PCI Devices"
@@ -25,7 +25,7 @@ while true; do
     case "$c" in
         1) btop ;;
         2) clear; fastfetch; read -rp "Press Enter to continue..." _ ;;
-        3) clear; inxi -Fxxxz; read -rp "Press Enter to continue..." _ ;;
+        3) clear; bash /opt/linuxre/tools/diagnostics.sh; ;;
         4) clear; hwinfo; read -rp "Press Enter to continue..." _ ;;
         5) clear; sensors; read -rp "Press Enter to continue..." _ ;;
         6) clear; lspci; read -rp "Press Enter to continue..." _ ;;

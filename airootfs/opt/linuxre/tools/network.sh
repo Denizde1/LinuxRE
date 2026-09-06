@@ -11,7 +11,8 @@ while true; do
     echo "  2) NetworkManager"
     echo "  3) Ping"
     echo "  4) Network Information"
-    echo "  5) Terminal"
+    echo "  5) Network Diagnostics [READ ONLY]"
+    echo "  6) Terminal"
     echo
     echo "  0) Back"
     echo
@@ -40,7 +41,30 @@ while true; do
             resolvectl status 2>/dev/null || cat /etc/resolv.conf
             read -rp "Press Enter to continue..." _
             ;;
-        5) clear; bash ;;
+        5)
+            clear
+            echo "Network Diagnostics"
+            echo "────────────────────────────"
+            echo
+            ip -br link
+            echo
+            ip -br addr
+            echo
+            ip route
+            echo
+            if getent hosts archlinux.org >/dev/null 2>&1; then
+                echo "DNS: working"
+            else
+                echo "DNS: unavailable"
+            fi
+            if ping -c 1 -W 3 archlinux.org >/dev/null 2>&1; then
+                echo "Internet: reachable"
+            else
+                echo "Internet: unreachable"
+            fi
+            read -rp "Press Enter to continue..." _
+            ;;
+        6) clear; bash ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

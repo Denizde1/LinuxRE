@@ -209,6 +209,7 @@ verify_package_integrity() {
 
 repair_package_integrity() {
     local output
+    local check_status
     local packages
     local package
 
@@ -221,11 +222,12 @@ repair_package_integrity() {
     log "Checking installed packages..."
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    check_status=$?
 
     packages="$(
         printf '%s\n' "$output" |
         awk -F: '
-            /[1-9][0-9]* (missing|altered) files?/ {
+            /^[[:alnum:]@._+:-]+:.*[1-9][0-9]* (missing|altered) files?/ {
                 print $1
             }
         ' |
@@ -235,6 +237,11 @@ repair_package_integrity() {
     )"
 
     if [[ -z "$packages" ]]; then
+        if (( check_status != 0 )); then
+            warn "Package integrity could not be inspected; pacman -Qkk exited with status $check_status."
+            return 1
+        fi
+
         ok "No packages require repair."
         return 0
     fi
@@ -263,6 +270,12 @@ repair_package_integrity() {
 
         ok "$package repaired."
     done <<< "$packages"
+
+    log "Rechecking package integrity after reinstalling affected packages..."
+    if ! verify_package_integrity; then
+        warn "Package integrity problems remain after repair."
+        return 1
+    fi
 
     return 0
 }

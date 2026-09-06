@@ -37,7 +37,7 @@ check_filesystem() {
             ;;
 
         btrfs)
-            btrfs check "$device"
+            btrfs check --readonly "$device"
             return $?
             ;;
 
