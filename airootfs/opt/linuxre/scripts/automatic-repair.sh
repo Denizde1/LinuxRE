@@ -49,6 +49,7 @@ write_repair_report() {
         echo "systemd-boot status: ${FINAL_SYSTEMD_BOOT_STATUS:-NOT_RUN}"
         echo "Initial filesystem check: ${INITIAL_FILESYSTEM_STATUS:-NOT_RUN}"
         echo "Initial package integrity: ${INITIAL_PACKAGE_INTEGRITY_STATUS:-NOT_RUN}"
+        echo "Affected packages: ${PACKAGE_INTEGRITY_PACKAGES:-none}"
         echo "Repair attempted: ${REPAIR_ATTEMPTED:-NO}"
         echo "Repair result: ${REPAIR_RESULT:-NOT_REQUIRED}"
         echo "Final filesystem verification: ${FINAL_FILESYSTEM_STATUS:-NOT_RUN}"

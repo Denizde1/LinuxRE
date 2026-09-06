@@ -39,6 +39,10 @@ create_linuxre_backup() {
             printf '%s\n' "Failed to export the target package list." >&2
             return 1
         }
+    elif [[ "$root_dir" != "/" ]]; then
+        rm -f -- "$package_list"
+        printf '%s\n' "arch-chroot is unavailable; refusing to export the live package list as target metadata." >&2
+        return 1
     elif command -v pacman >/dev/null 2>&1; then
         pacman -Qqe > "$package_list" || {
             rm -f -- "$package_list"
@@ -49,16 +53,33 @@ create_linuxre_backup() {
         printf '%s\n' "pacman is unavailable; package list was not exported." > "$package_list"
     fi
 
-    tar -czf "$archive" \
-        --ignore-failed-read \
-        -C "$root_dir" \
-        etc/fstab etc/mkinitcpio.d etc/systemd \
-        boot/loader boot/EFI boot/grub \
-        2>/dev/null || {
+    local backup_paths=()
+    local path
+
+    for path in \
+        etc/fstab \
+        etc/mkinitcpio.d \
+        etc/systemd \
+        boot/loader \
+        boot/EFI \
+        boot/grub
+    do
+        if [[ -e "$root_dir/$path" ]]; then
+            backup_paths+=("$path")
+        fi
+    done
+
+    if ((${#backup_paths[@]} == 0)); then
+        rm -f -- "$package_list"
+        printf '%s\n' "No supported configuration or boot files were found." >&2
+        return 1
+    fi
+
+    if ! tar -czf "$archive" -C "$root_dir" "${backup_paths[@]}"; then
         rm -f -- "$archive" "$package_list"
         printf '%s\n' "Backup archive creation failed." >&2
         return 1
-    }
+    fi
 
     printf 'Archive : %s\nPackages: %s\n' "$archive" "$package_list"
 }

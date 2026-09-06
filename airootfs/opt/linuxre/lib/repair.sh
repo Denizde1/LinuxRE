@@ -187,13 +187,17 @@ verify_package_integrity() {
     log "Checking package integrity..."
 
     local output
+    PACKAGE_INTEGRITY_PACKAGES=""
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
+        printf '%s\n' "$output" >> "$REPORT_LOG_PATH" 2>/dev/null || true
         warn "Package integrity check failed."
         return 1
     }
 
     if printf '%s\n' "$output" | package_integrity_has_problems; then
+        PACKAGE_INTEGRITY_PACKAGES="$(printf '%s\n' "$output" | extract_damaged_packages)"
+        printf '%s\n' "$output" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 
         warn "Package integrity problems were detected."
         return 1
@@ -224,8 +228,11 @@ repair_package_integrity() {
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
     check_status=$?
+    printf '%s\n' "$output" >> "$REPORT_LOG_PATH" 2>/dev/null || true
 
     packages="$(printf '%s\n' "$output" | extract_damaged_packages)"
+    # shellcheck disable=SC2034
+    PACKAGE_INTEGRITY_PACKAGES="$packages"
 
     if [[ -z "$packages" ]]; then
         if (( check_status != 0 )); then
@@ -261,12 +268,6 @@ repair_package_integrity() {
 
         ok "$package repaired."
     done <<< "$packages"
-
-    log "Rechecking package integrity after reinstalling affected packages..."
-    if ! verify_package_integrity; then
-        warn "Package integrity problems remain after repair."
-        return 1
-    fi
 
     return 0
 }

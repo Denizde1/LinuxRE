@@ -42,6 +42,8 @@ assert_equal $'foo-bar@1.2.3-1\npython-pyaml' "$(printf '%s\n' "$valid_names" | 
     "valid Arch package names"
 assert_equal "" "$(printf '%s\n' "$unexpected" | extract_damaged_packages)" \
     "unexpected output is not treated as a package"
+assert_equal filesystem "$(printf '%s\n' 'filesystem: 22 total files, 1 altered file, 0 missing files' | extract_damaged_packages)" \
+    "combined altered and missing counts"
 
 if printf '%s\n' "$multiple_damaged" | package_integrity_has_problems; then
     printf 'PASS: damaged output is detected\n'
