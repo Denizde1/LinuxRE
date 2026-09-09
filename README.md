@@ -1,4 +1,6 @@
 I built a recovery environment because Arch developers wouldn't. Well, why would they?
 # LinuxRE
-A basic recovery environment for Arch Linux. It can also be used to install Arch Linux using arch-install-scripts or archinstall.
-LinuxRE is UEFI-only (v0.2+).
+It's a basic recovery environment for Arch Linux. It has own scripts to recover your system.
+You can find the ISO files in the SourceForge or you can build it yourself.
+Note: If you can repair manually, I know you can.
+This project is for those who are as lazy as I am to write commands.
