@@ -3,7 +3,7 @@
 set -uo pipefail
 
 # shellcheck disable=SC1091
-source /opt/linuxre/lib/v08-diagnostics.sh
+source /opt/linuxre/lib/diagnostics.sh
 
 while true; do
     clear
@@ -186,25 +186,25 @@ while true; do
 
         9)
             clear
-            v08_boot_browser
+            boot_browser
             read -r -p "Press Enter to continue..." _
             ;;
 
         10)
             clear
-            v08_package_diagnostics
+            package_diagnostics
             read -r -p "Press Enter to continue..." _
             ;;
 
         11)
             clear
-            v08_user_diagnostics
+            user_diagnostics
             read -r -p "Press Enter to continue..." _
             ;;
 
         12)
             clear
-            v08_write_report
+            write_report
             read -r -p "Press Enter to continue..." _
             ;;
 
