@@ -12,7 +12,7 @@ pause() {
 while true; do
     clear
     echo "╔══════════════════════════════════════════╗"
-    echo "║            LinuxRE Help / Yardım         ║"
+    echo "║              LinuxRE Help               ║"
     echo "╚══════════════════════════════════════════╝"
     echo
     linuxre_help_print
@@ -21,7 +21,9 @@ while true; do
     echo
     echo "  0) Back"
     echo
-    read -r -p "Select an option: " choice
+    if ! read -r -p "Select an option: " choice; then
+        exit 0
+    fi
 
     case "$choice" in
         1)

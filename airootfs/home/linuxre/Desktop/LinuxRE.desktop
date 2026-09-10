@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=LinuxRE Recovery Center
-Comment=LinuxRE Recovery Tools
+Name=LinuxRE
+Comment=LinuxRE recovery tools
 Exec=konsole -e bash /opt/linuxre/linuxre
 Icon=system-recovery
 Terminal=false

@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -uo pipefail
+
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/v08-diagnostics.sh
+
 while true; do
     clear
 
@@ -11,7 +16,8 @@ while true; do
     echo "  2) NetworkManager"
     echo "  3) Ping"
     echo "  4) Network Information"
-    echo "  5) Terminal"
+    echo "  5) Network Diagnostics"
+    echo "  6) Terminal"
     echo
     echo "  0) Back"
     echo
@@ -40,7 +46,8 @@ while true; do
             resolvectl status 2>/dev/null || cat /etc/resolv.conf
             read -rp "Press Enter to continue..." _
             ;;
-        5) clear; bash ;;
+        5) clear; v08_network_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        6) clear; bash ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

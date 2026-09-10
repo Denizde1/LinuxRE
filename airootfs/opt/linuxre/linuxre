@@ -16,8 +16,7 @@ while true; do
     echo "  6) Terminal"
     echo "  7) Update the Environment"
     echo "  8) Automatic Repair"
-    echo "  9) Recovery Center (v0.8)"
-    echo " 10) Help / Yardım"
+    echo "  9) Help"
     echo
     echo "  0) Power Off"
     echo
@@ -33,8 +32,7 @@ while true; do
         6) clear; bash ;;
         7) bash /opt/linuxre/tools/update.sh ;;
         8) sudo bash /opt/linuxre/scripts/automatic-repair.sh ;;
-        9) bash /opt/linuxre/tools/recovery-center.sh ;;
-        10) bash /opt/linuxre/tools/help.sh ;;
+        9) bash /opt/linuxre/tools/help.sh ;;
         0) clear; sudo shutdown now ;;
         *) echo "Invalid option."; sleep 1 ;;
     esac

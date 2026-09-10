@@ -124,7 +124,7 @@ fastfetch
 lm_sensors
 inxi
 
-# Recovery Center
+# Recovery and diagnostics
 python
 python-pip
 pyside6
