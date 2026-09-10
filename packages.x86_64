@@ -150,6 +150,7 @@ timeshift
 # Hardware Information
 lshw
 hwinfo
+iproute2
 
 # Firmware & Secure Boot
 fwupd

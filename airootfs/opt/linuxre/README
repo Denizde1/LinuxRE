@@ -1,4 +1,4 @@
-LinuxRE v0.7
+LinuxRE v0.8
 Arch-based Recovery Environment
 
 Features:
@@ -13,3 +13,5 @@ Features:
 - Automatic Repair
 - Systemd Repair
 - Kernel Repair
+- Recovery Center: storage, LUKS/LVM, snapshots, boot, fstab, packages, network, users, journal
+- Complete privacy-restricted recovery reports
