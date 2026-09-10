@@ -2,36 +2,36 @@
 
 set -uo pipefail
 
-LINUXRE_MORE_HELP_URL='https://youtu.be/dQw4w9WgXcQ?si=ycdGx4yHFjlr4KBp&utm_source=chatgpt.com'
+LINUXRE_MORE_HELP_URL='https://youtu.be/dQw4w9WgXcQ?si=LemS76Xh1sltnE1L'
 
 linuxre_help_print() {
-    echo "LinuxRE nedir: Arch Linux için recovery ortamıdır. Hedef sistemin kök diskini, boot yüklemesini, filesystem'ini ve ağ/uygulama durumunu güvenli şekilde inceler."
+    echo "LinuxRE is an Arch Linux recovery environment. It safely inspects a target system's root disk, boot setup, filesystems, and network/application state."
     echo
-    echo "Recovery Center ne işe yarar: Disk, LUKS/LVM, Btrfs, systemd-boot, pacman, ağ ve journal gibi recovery verilerini tek yerde gösterir."
+    echo "Integrated diagnostics: Show disk, LUKS/LVM, Btrfs, systemd-boot, pacman, network, and journal data in focused menu sections."
     echo
-    echo "Automatic Repair ne yapar: Dosya sistemi, paket bütünlüğü, kernel/initramfs, systemd ve boot mantığını güvenli sınırlar içinde doğrular ve gerekliyse onarır."
+    echo "Automatic Repair: Checks filesystems, package integrity, kernel/initramfs, systemd, and boot configuration, then repairs supported problems when needed."
     echo
-    echo "Disk / partition işlemleri: Diskleri ve bölümleri kontrol eder, root/ESP seçimini ve mount durumunu yönetir; ancak yıkıcı işlemler için her zaman dikkatli doğrulama ister."
+    echo "Disk / partition operations: Inspect disks and partitions and manage root/ESP selection and mounts. Destructive operations always require careful verification."
     echo
-    echo "LUKS ve LVM diagnostics: Şifrelenmiş diskleri, mapper'ları, VG/LV hiyerarşisini ve aktiflik durumunu gösterir; güvenli tarama ve raporlama odaklıdır."
+    echo "LUKS and LVM diagnostics: Show encrypted devices, mappings, VG/LV hierarchy, and activation state with a safe inspection and reporting focus."
     echo
-    echo "Btrfs snapshot browser: snapshot/subvolume listesi ve readonly/writable durumunu gösterir; restore yerine tarama ve izleme için kullanılır."
+    echo "Btrfs snapshot browser: Lists snapshots and subvolumes with read-only/writable state. It is for inspection, not restoration."
     echo
-    echo "systemd-boot diagnostics: loader.conf, entries, EFI yolu ve default/timeout bilgilerini görüntüler; yıkıcı değişiklik yapmaz."
+    echo "systemd-boot diagnostics: Shows loader.conf, entries, EFI paths, and default/timeout settings without destructive changes."
     echo
-    echo "Pacman integrity/cache diagnostics: bozulmuş paketler, eksik dosyalar ve cache durumunu ayrıştırır; internet olmadan yeniden kurulum için paket önbelleğini değerlendirir."
+    echo "Pacman integrity/cache diagnostics: Identify damaged packages and missing files and assess cached packages for offline reinstalls."
     echo
-    echo "Network diagnostics: interface, IP, route, DNS ve internet erişimini değerlendirir; ağ sorunlarını hızlı bir bakışta gösterir."
+    echo "Network diagnostics: Check interfaces, IP configuration, routes, DNS, and internet access for a quick view of network problems."
     echo
-    echo "Recovery report: LinuxRE sürümünü, disk durumunu, boot bilgilerini, pacman ve network sonuçlarını tek bir rapora toplar; hassas bilgileri gereksiz yere yazmaz."
+    echo "Recovery report: Combines LinuxRE version, storage, boot, pacman, and network results in one report without unnecessary sensitive data."
     echo
-    echo "Yaygın durumlar:"
-    echo "- Root filesystem bulunamıyor: hedef disk seçimi veya mount işlemi doğru yapılmamış olabilir."
-    echo "- LUKS kilitli: encrypted disk open edilmemiş olabilir; uygun mapper ve target yönetimi gerekir."
-    echo "- Btrfs snapshot yok: normaldir; snapshot tarama yalnızca bilgi amaçlıdır."
-    echo "- Pacman integrity sorunları: paket dosyaları bozulmuş veya eksik olabilir; tam sistem upgrade yerine sadece gerekli paketler hedeflenir."
-    echo "- Boot problemi: ESP, loader.conf, kernel/initramfs veya systemd-boot uyumsuzluğu kaynaklı olabilir."
-    echo "- Ağ sorunu: DNS, route veya gateway erişimi yoksa network diagnostics bunu açıkça gösterir."
+    echo "Common situations:"
+    echo "- Root filesystem not found: The target disk may not be selected or mounted correctly."
+    echo "- LUKS is locked: The encrypted device may need to be opened and mapped before target preparation."
+    echo "- No Btrfs snapshots: This is normal; snapshot browsing is informational only."
+    echo "- Pacman integrity problems: Package files may be damaged or missing; target only required packages instead of performing a full upgrade."
+    echo "- Boot problem: The ESP, loader.conf, kernel/initramfs, or systemd-boot configuration may be inconsistent."
+    echo "- Network problem: Network diagnostics identifies missing DNS, routes, or gateway access."
 }
 
 linuxre_open_more_help() {

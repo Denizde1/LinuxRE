@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -uo pipefail
+
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/v08-diagnostics.sh
+
 while true; do
     clear
 
@@ -16,7 +21,12 @@ while true; do
     echo "  7) Disk Health (SMART)"
     echo "  8) NVMe Information"
     echo "  9) Mount Manager"
-    echo "  10) System Image Recovery"
+    echo " 10) System Image Recovery"
+    echo " 11) Storage Explorer"
+    echo " 12) LUKS Diagnostics"
+    echo " 13) LVM Explorer"
+    echo " 14) Btrfs Snapshot Browser"
+    echo " 15) fstab Diagnostics"
     echo
     echo "  0) Back"
     echo
@@ -49,7 +59,12 @@ while true; do
             read -rp "Press Enter to continue..." _
             ;;
 
-        9) bash /opt/linuxre/tools/mountmanager.sh ;; 
+        9) bash /opt/linuxre/tools/mountmanager.sh ;;
+        11) clear; v08_storage_explorer; read -r -p "Press Enter to continue..." _ ;;
+        12) clear; v08_luks_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        13) clear; v08_lvm_explorer; read -r -p "Press Enter to continue..." _ ;;
+        14) clear; v08_btrfs_snapshots; read -r -p "Press Enter to continue..." _ ;;
+        15) clear; v08_fstab_diagnostics; read -r -p "Press Enter to continue..." _ ;;
         10) bash /opt/linuxre/tools/disk-imaging.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;

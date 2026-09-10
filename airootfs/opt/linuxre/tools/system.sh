@@ -17,8 +17,9 @@ while true; do
     echo "  8) Log Viewer"
     echo "  9) System Repair"
     echo " 10) LinuxRE Read-Only Diagnostics"
-    echo " 11) LinuxRE v0.8 Recovery Center"
-    echo " 12) Help / Yardım"
+    echo " 11) System and Hardware Report"
+    echo " 12) Help"
+    echo " 13) Journal / systemd Diagnostics"
     echo
     echo "  0) Back"
     echo
@@ -36,7 +37,8 @@ while true; do
         8) sudo bash /opt/linuxre/tools/logs.sh ;;
         9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
         10) bash /opt/linuxre/tools/diagnostics.sh ;;
-        11) bash /opt/linuxre/tools/recovery-center.sh ;;
+        11) clear; v08_system_information; read -r -p "Press Enter to continue..." _ ;;
+        13) clear; v08_journal_diagnostics; read -r -p "Press Enter to continue..." _ ;;
         12) bash /opt/linuxre/tools/help.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;

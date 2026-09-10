@@ -1,5 +1,10 @@
 #!/bin/bash
 
+set -uo pipefail
+
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/v08-diagnostics.sh
+
 while true; do
     clear
 
@@ -16,6 +21,10 @@ while true; do
     echo "  6) ddrescue"
     echo "  7) File System Tools"
     echo "  8) Filesystem Check"
+    echo "  9) Boot Entry Browser"
+    echo " 10) Pacman Diagnostics"
+    echo " 11) Target User Information"
+    echo " 12) Recovery Report"
     echo
 
     echo "  0) Back"
@@ -173,6 +182,30 @@ while true; do
 
         8)
             sudo bash /opt/linuxre/tools/fsck.sh
+            ;;
+
+        9)
+            clear
+            v08_boot_browser
+            read -r -p "Press Enter to continue..." _
+            ;;
+
+        10)
+            clear
+            v08_package_diagnostics
+            read -r -p "Press Enter to continue..." _
+            ;;
+
+        11)
+            clear
+            v08_user_diagnostics
+            read -r -p "Press Enter to continue..." _
+            ;;
+
+        12)
+            clear
+            v08_write_report
+            read -r -p "Press Enter to continue..." _
             ;;
 
         0)

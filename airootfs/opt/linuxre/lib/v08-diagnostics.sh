@@ -74,6 +74,20 @@ v08_storage_explorer() {
     fi
 }
 
+v08_lvm_explorer() {
+    v08_section "LVM explorer"
+    if ! command -v pvs >/dev/null 2>&1; then
+        printf 'LVM tools are not installed.\n'
+        return 0
+    fi
+    printf 'Physical volumes:\n'
+    pvs --noheadings --options pv_name,vg_name,pv_size,pv_free,pv_attr 2>/dev/null || printf '  unavailable\n'
+    printf '\nVolume groups:\n'
+    vgs --noheadings --options vg_name,vg_size,vg_free,vg_attr,vg_active 2>/dev/null || printf '  unavailable\n'
+    printf '\nLogical volumes:\n'
+    lvs --noheadings --options lv_path,vg_name,lv_size,lv_attr,lv_active 2>/dev/null || printf '  unavailable\n'
+}
+
 v08_luks_diagnostics() {
     v08_section "LUKS diagnostics"
     if ! command -v lsblk >/dev/null 2>&1; then
