@@ -3,6 +3,7 @@
 set -uo pipefail
 
 LINUXRE_MORE_HELP_URL='https://youtu.be/dQw4w9WgXcQ?si=LemS76Xh1sltnE1L'
+LINUXRE_MORE_HELP_PAGE='/opt/linuxre/more-help.html'
 
 linuxre_help_print() {
     echo "LinuxRE is an Arch Linux recovery environment. It safely inspects a target system's root disk, boot setup, filesystems, and network/application state."
@@ -35,18 +36,25 @@ linuxre_help_print() {
 }
 
 linuxre_open_more_help() {
-    if command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "${LINUXRE_MORE_HELP_URL}" >/dev/null 2>&1 || true
+    local help_page="${LINUXRE_MORE_HELP_PAGE}"
+
+    if command -v firefox >/dev/null 2>&1 && [[ -f "$help_page" ]]; then
+        firefox --new-window "$help_page" >/dev/null 2>&1 || true
         return 0
     fi
 
-    if command -v gio >/dev/null 2>&1; then
-        gio open "${LINUXRE_MORE_HELP_URL}" >/dev/null 2>&1 || true
+    if command -v xdg-open >/dev/null 2>&1 && [[ -f "$help_page" ]]; then
+        xdg-open "$help_page" >/dev/null 2>&1 || true
         return 0
     fi
 
-    if command -v sensible-browser >/dev/null 2>&1; then
-        sensible-browser "${LINUXRE_MORE_HELP_URL}" >/dev/null 2>&1 || true
+    if command -v gio >/dev/null 2>&1 && [[ -f "$help_page" ]]; then
+        gio open "$help_page" >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    if command -v sensible-browser >/dev/null 2>&1 && [[ -f "$help_page" ]]; then
+        sensible-browser "$help_page" >/dev/null 2>&1 || true
         return 0
     fi
 
