@@ -37,8 +37,8 @@ while true; do
         8) sudo bash /opt/linuxre/tools/logs.sh ;;
         9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
         10) bash /opt/linuxre/tools/diagnostics.sh ;;
-        11) clear; v08_system_information; read -r -p "Press Enter to continue..." _ ;;
-        13) clear; v08_journal_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        11) clear; system_information; read -r -p "Press Enter to continue..." _ ;;
+        13) clear; journal_diagnostics; read -r -p "Press Enter to continue..." _ ;;
         12) bash /opt/linuxre/tools/help.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;

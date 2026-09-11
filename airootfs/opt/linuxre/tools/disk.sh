@@ -3,7 +3,7 @@
 set -uo pipefail
 
 # shellcheck disable=SC1091
-source /opt/linuxre/lib/v08-diagnostics.sh
+source /opt/linuxre/lib/diagnostics.sh
 
 while true; do
     clear
@@ -60,11 +60,11 @@ while true; do
             ;;
 
         9) bash /opt/linuxre/tools/mountmanager.sh ;;
-        11) clear; v08_storage_explorer; read -r -p "Press Enter to continue..." _ ;;
-        12) clear; v08_luks_diagnostics; read -r -p "Press Enter to continue..." _ ;;
-        13) clear; v08_lvm_explorer; read -r -p "Press Enter to continue..." _ ;;
-        14) clear; v08_btrfs_snapshots; read -r -p "Press Enter to continue..." _ ;;
-        15) clear; v08_fstab_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        11) clear; storage_explorer; read -r -p "Press Enter to continue..." _ ;;
+        12) clear; luks_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        13) clear; lvm_explorer; read -r -p "Press Enter to continue..." _ ;;
+        14) clear; btrfs_snapshots; read -r -p "Press Enter to continue..." _ ;;
+        15) clear; fstab_diagnostics; read -r -p "Press Enter to continue..." _ ;;
         10) bash /opt/linuxre/tools/disk-imaging.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;

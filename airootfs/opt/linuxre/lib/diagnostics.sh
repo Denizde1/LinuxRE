@@ -8,13 +8,13 @@ source /opt/linuxre/lib/common.sh
 source /opt/linuxre/lib/target.sh
 
 LINUXRE_VERSION="${LINUXRE_VERSION:-0.8}"
-V08_REPORT="${V08_REPORT:-0}"
+REPORT_MODE="${REPORT_MODE:-0}"
 
-v08_section() {
+diagnostics_section() {
     printf '\n=== %s ===\n' "$1"
 }
 
-v08_command() {
+diagnostics_command() {
     local label="$1"
     shift
     printf '%s:\n' "$label"
@@ -25,28 +25,28 @@ v08_command() {
     fi
 }
 
-v08_system_information() {
-    v08_section "System information"
+system_information() {
+    diagnostics_section "System information"
     printf 'LinuxRE version: %s\n' "$LINUXRE_VERSION"
     printf 'Kernel: %s\n' "$(uname -r 2>/dev/null || printf unknown)"
     printf 'Firmware: %s\n' "$(if [[ -d /sys/firmware/efi ]]; then printf UEFI; else printf legacy/non-UEFI; fi)"
-    v08_command "CPU" lscpu
-    v08_command "Memory" free -h
-    v08_command "GPU" lspci -nnk -d ::0300
-    v08_command "PCI devices" lspci -nn
-    v08_command "USB devices" lsusb
-    if (( V08_REPORT )); then
-        v08_command "Block devices" lsblk -e7 -o NAME,PATH,MODEL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
+    diagnostics_command "CPU" lscpu
+    diagnostics_command "Memory" free -h
+    diagnostics_command "GPU" lspci -nnk -d ::0300
+    diagnostics_command "PCI devices" lspci -nn
+    diagnostics_command "USB devices" lsusb
+    if (( REPORT_MODE )); then
+        diagnostics_command "Block devices" lsblk -e7 -o NAME,PATH,MODEL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
     else
-        v08_command "Block devices" lsblk -e7 -o NAME,PATH,MODEL,SERIAL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
+        diagnostics_command "Block devices" lsblk -e7 -o NAME,PATH,MODEL,SERIAL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
     fi
-    v08_command "Network interfaces" ip -br addr
-    v08_command "Installed live kernels" pacman -Q linux linux-lts linux-zen linux-hardened
+    diagnostics_command "Network interfaces" ip -br addr
+    diagnostics_command "Installed live kernels" pacman -Q linux linux-lts linux-zen linux-hardened
 }
 
-v08_storage_explorer() {
-    v08_section "Storage explorer"
-    v08_command "Devices and hierarchy" lsblk -e7 -o NAME,PATH,MODEL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
+storage_explorer() {
+    diagnostics_section "Storage explorer"
+    diagnostics_command "Devices and hierarchy" lsblk -e7 -o NAME,PATH,MODEL,SIZE,ROTA,TRAN,TYPE,FSTYPE,LABEL,UUID,PARTTYPE,MOUNTPOINTS
 
     if command -v lsblk >/dev/null 2>&1; then
         printf '\nEncrypted devices:\n'
@@ -74,8 +74,8 @@ v08_storage_explorer() {
     fi
 }
 
-v08_lvm_explorer() {
-    v08_section "LVM explorer"
+lvm_explorer() {
+    diagnostics_section "LVM explorer"
     if ! command -v pvs >/dev/null 2>&1; then
         printf 'LVM tools are not installed.\n'
         return 0
@@ -88,8 +88,8 @@ v08_lvm_explorer() {
     lvs --noheadings --options lv_path,vg_name,lv_size,lv_attr,lv_active 2>/dev/null || printf '  unavailable\n'
 }
 
-v08_luks_diagnostics() {
-    v08_section "LUKS diagnostics"
+luks_diagnostics() {
+    diagnostics_section "LUKS diagnostics"
     if ! command -v lsblk >/dev/null 2>&1; then
         printf 'lsblk is unavailable.\n'
         return 0
@@ -120,8 +120,8 @@ v08_luks_diagnostics() {
     fi
 }
 
-v08_btrfs_snapshots() {
-    v08_section "Btrfs snapshots"
+btrfs_snapshots() {
+    diagnostics_section "Btrfs snapshots"
     if ! command -v btrfs >/dev/null 2>&1; then
         printf 'btrfs-progs is unavailable.\n'
         return 0
@@ -140,8 +140,8 @@ v08_btrfs_snapshots() {
     done < <(findmnt -rn -o TARGET,FSTYPE 2>/dev/null)
 }
 
-v08_boot_browser() {
-    v08_section "Boot entries"
+boot_browser() {
+    diagnostics_section "Boot entries"
     local esp
     for esp in /efi /boot /boot/efi; do
         [[ -d "$esp/loader" ]] || continue
@@ -165,8 +165,8 @@ v08_boot_browser() {
     fi
 }
 
-v08_fstab_diagnostics() {
-    v08_section "fstab diagnostics"
+fstab_diagnostics() {
+    diagnostics_section "fstab diagnostics"
     local fstab="${1:-$MNT/etc/fstab}"
     [[ -r "$fstab" ]] || { printf 'fstab unavailable: %s\n' "$fstab"; return 0; }
 
@@ -191,8 +191,8 @@ v08_fstab_diagnostics() {
     done < <(awk '!/^[[:space:]]*#/ && NF >= 6 { print $1, $2, $3 }' "$fstab")
 }
 
-v08_package_diagnostics() {
-    v08_section "Pacman diagnostics"
+package_diagnostics() {
+    diagnostics_section "Pacman diagnostics"
     local cache="${MNT:-/mnt}/var/cache/pacman/pkg"
     if [[ -d "$cache" ]]; then
         printf 'Cached packages: %s\n' "$(find "$cache" -maxdepth 1 -type f -name '*.pkg.tar.*' | wc -l)"
@@ -213,11 +213,11 @@ v08_package_diagnostics() {
     fi
 }
 
-v08_network_diagnostics() {
-    v08_section "Network diagnostics"
+network_diagnostics() {
+    diagnostics_section "Network diagnostics"
     local interface
     while read -r interface state address; do
-        if (( V08_REPORT )); then
+        if (( REPORT_MODE )); then
             printf '[%s] %s state=%s\n' \
                 "$([[ "$state" == UP ]] && printf OK || printf WARNING)" \
                 "$interface" "$state"
@@ -238,19 +238,19 @@ v08_network_diagnostics() {
     fi
 }
 
-v08_user_diagnostics() {
-    v08_section "Target users"
+user_diagnostics() {
+    diagnostics_section "Target users"
     local passwd_file="${MNT:-/mnt}/etc/passwd"
     [[ -r "$passwd_file" ]] || { printf 'Target passwd file unavailable.\n'; return 0; }
-    if (( V08_REPORT )); then
+    if (( REPORT_MODE )); then
         awk -F: '$3 >= 1000 || $1 == "root" { print "  " $1 " UID=" $3 " shell=" $7 }' "$passwd_file"
     else
         awk -F: '$3 >= 1000 || $1 == "root" { print "  " $1 " UID=" $3 " home=" $6 " shell=" $7 }' "$passwd_file"
     fi
 }
 
-v08_journal_diagnostics() {
-    v08_section "Journal and systemd diagnostics"
+journal_diagnostics() {
+    diagnostics_section "Journal and systemd diagnostics"
     if [[ -d "${MNT:-/mnt}/var/log/journal" ]]; then
         printf 'Target persistent journal: available\n'
         journalctl --directory="${MNT:-/mnt}/var/log/journal" -p err..alert -n 30 --no-pager 2>/dev/null ||
@@ -263,25 +263,25 @@ v08_journal_diagnostics() {
     fi
 }
 
-v08_write_report() {
+write_report() {
     local report="${1:-${REPORT_FILE_PATH:-/var/log/linuxre-report.txt}}"
     mkdir -p "$(dirname "$report")" || return 1
-    V08_REPORT=1
+    REPORT_MODE=1
     {
         printf 'LinuxRE %s Recovery Report\n' "$LINUXRE_VERSION"
         printf 'Generated: %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-        v08_system_information
-        v08_storage_explorer
-        v08_luks_diagnostics
-        v08_btrfs_snapshots
-        v08_boot_browser
-        v08_fstab_diagnostics
-        v08_package_diagnostics
-        v08_network_diagnostics
-        v08_user_diagnostics
-        v08_journal_diagnostics
+        system_information
+        storage_explorer
+        luks_diagnostics
+        btrfs_snapshots
+        boot_browser
+        fstab_diagnostics
+        package_diagnostics
+        network_diagnostics
+        user_diagnostics
+        journal_diagnostics
     } > "$report"
-    V08_REPORT=0
+    REPORT_MODE=0
     chmod 600 "$report"
     printf 'Recovery report written to %s\n' "$report"
 }

@@ -3,7 +3,7 @@
 set -uo pipefail
 
 # shellcheck disable=SC1091
-source /opt/linuxre/lib/v08-diagnostics.sh
+source /opt/linuxre/lib/diagnostics.sh
 
 while true; do
     clear
@@ -46,7 +46,7 @@ while true; do
             resolvectl status 2>/dev/null || cat /etc/resolv.conf
             read -rp "Press Enter to continue..." _
             ;;
-        5) clear; v08_network_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        5) clear; network_diagnostics; read -r -p "Press Enter to continue..." _ ;;
         6) clear; bash ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;
