@@ -12,7 +12,7 @@ pause() {
 while true; do
     clear
     echo "╔══════════════════════════════════════════╗"
-    echo "║              LinuxRE Help               ║"
+    echo "║              LinuxRE Help                ║"
     echo "╚══════════════════════════════════════════╝"
     echo
     linuxre_help_print

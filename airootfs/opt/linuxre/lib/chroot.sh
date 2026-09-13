@@ -4,6 +4,7 @@ set -uo pipefail
 
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/common.sh
+
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
 
@@ -12,13 +13,19 @@ source /opt/linuxre/lib/target.sh
 # ==================================================
 
 prepare_dns() {
-
     local target_resolv="$MNT/etc/resolv.conf"
     local backup="$TMP/resolv.conf.backup"
     local missing="$TMP/resolv.conf.backup.missing"
 
     if [[ ! -d "$MNT/etc" ]]; then
         warn "Target /etc directory does not exist."
+        return 1
+    fi
+
+    # TMP must not depend on the target root mount.
+    # Re-create it in case it was cleaned earlier.
+    if ! mkdir -p "$TMP" 2>/dev/null; then
+        warn "Failed to create LinuxRE temporary directory: $TMP"
         return 1
     fi
 
@@ -32,7 +39,10 @@ prepare_dns() {
             return 1
         fi
     else
-        : > "$missing"
+        if ! : > "$missing"; then
+            warn "Failed to create DNS state marker."
+            return 1
+        fi
     fi
 
     if [[ ! -e /etc/resolv.conf ]]; then
@@ -44,11 +54,19 @@ prepare_dns() {
 
     if ! cp -L /etc/resolv.conf "$target_resolv"; then
         warn "Failed to copy DNS configuration."
+
+        # Restore the original configuration immediately if possible.
+        if [[ -e "$backup" || -L "$backup" ]]; then
+            rm -f "$target_resolv"
+            mv "$backup" "$target_resolv" 2>/dev/null || true
+        elif [[ -e "$missing" ]]; then
+            rm -f "$target_resolv"
+        fi
+
         return 1
     fi
 
     ok "DNS configuration prepared."
-
     return 0
 }
 
@@ -57,10 +75,15 @@ prepare_dns() {
 # ==================================================
 
 restore_dns() {
-
     local target_resolv="$MNT/etc/resolv.conf"
     local backup="$TMP/resolv.conf.backup"
     local missing="$TMP/resolv.conf.backup.missing"
+
+    # If the target filesystem is no longer mounted, there is
+    # nothing safe to restore here.
+    if [[ ! -d "$MNT/etc" ]]; then
+        return 0
+    fi
 
     if [[ -e "$backup" || -L "$backup" ]]; then
         rm -f "$target_resolv"
@@ -71,7 +94,6 @@ restore_dns() {
         fi
 
         rm -f "$missing"
-
         ok "Original DNS configuration restored."
         return 0
     fi
@@ -88,6 +110,10 @@ restore_dns() {
     return 0
 }
 
+# ==================================================
+# Chroot runtime mounts
+# ==================================================
+
 CHROOT_RUNTIME_MOUNTS=()
 
 cleanup_chroot_mounts() {
@@ -101,8 +127,10 @@ cleanup_chroot_mounts() {
 
     for mountpoint_path in "${CHROOT_RUNTIME_MOUNTS[@]}"; do
         [[ -n "$mountpoint_path" ]] || continue
+
         if mountpoint -q "$mountpoint_path"; then
             log "Unmounting chroot runtime mount: $mountpoint_path"
+
             if ! umount --recursive "$mountpoint_path" 2>/dev/null; then
                 warn "Failed to unmount chroot runtime mount: $mountpoint_path"
                 remaining+=("$mountpoint_path")
@@ -112,6 +140,7 @@ cleanup_chroot_mounts() {
     done
 
     CHROOT_RUNTIME_MOUNTS=("${remaining[@]}")
+
     return "$failed"
 }
 
@@ -120,7 +149,11 @@ bind_chroot_runtime_mount() {
     local target="$2"
 
     [[ -n "$source" ]] || return 1
-    mkdir -p "$target" 2>/dev/null || return 1
+
+    if ! mkdir -p "$target" 2>/dev/null; then
+        warn "Failed to create chroot mount point: $target"
+        return 1
+    fi
 
     if mountpoint -q "$target"; then
         return 0
@@ -131,13 +164,14 @@ bind_chroot_runtime_mount() {
         return 1
     fi
 
-    mount --make-rslave "$target" 2>/dev/null || {
+    if ! mount --make-rslave "$target" 2>/dev/null; then
         warn "Failed to make chroot mount private: $target"
         umount --recursive "$target" 2>/dev/null || true
         return 1
-    }
+    fi
 
     CHROOT_RUNTIME_MOUNTS+=("$target")
+
     return 0
 }
 
@@ -158,6 +192,13 @@ prepare_chroot() {
         return 1
     fi
 
+    # Ensure the temporary directory exists before touching
+    # anything inside the target root.
+    if ! mkdir -p "$TMP" 2>/dev/null; then
+        warn "Failed to create LinuxRE temporary directory: $TMP"
+        return 1
+    fi
+
     # Make sure ESP information exists.
     if [[ -z "$ESP_DEV" ]]; then
         detect_esp || return 1
@@ -174,19 +215,72 @@ prepare_chroot() {
         fi
     fi
 
-    if ! prepare_dns ||
-       ! bind_chroot_runtime_mount /dev "$MNT/dev" ||
-       ! bind_chroot_runtime_mount /proc "$MNT/proc" ||
-       ! bind_chroot_runtime_mount /sys "$MNT/sys" ||
-       ! bind_chroot_runtime_mount /run "$MNT/run"; then
-        restore_dns || true
-        cleanup_chroot_mounts
+    # Prepare DNS first so that the original resolv.conf is backed up
+    # before entering the chroot.
+    if ! prepare_dns; then
         if (( esp_mounted_here )) &&
            [[ -n "$ESP_MOUNT" ]] &&
            mountpoint -q "$MNT$ESP_MOUNT"; then
             umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
             TARGET_ESP_MOUNTED=0
         fi
+
+        return 1
+    fi
+
+    if ! bind_chroot_runtime_mount /dev "$MNT/dev"; then
+        restore_dns || true
+        cleanup_chroot_mounts
+
+        if (( esp_mounted_here )) &&
+           [[ -n "$ESP_MOUNT" ]] &&
+           mountpoint -q "$MNT$ESP_MOUNT"; then
+            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
+            TARGET_ESP_MOUNTED=0
+        fi
+
+        return 1
+    fi
+
+    if ! bind_chroot_runtime_mount /proc "$MNT/proc"; then
+        restore_dns || true
+        cleanup_chroot_mounts
+
+        if (( esp_mounted_here )) &&
+           [[ -n "$ESP_MOUNT" ]] &&
+           mountpoint -q "$MNT$ESP_MOUNT"; then
+            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
+            TARGET_ESP_MOUNTED=0
+        fi
+
+        return 1
+    fi
+
+    if ! bind_chroot_runtime_mount /sys "$MNT/sys"; then
+        restore_dns || true
+        cleanup_chroot_mounts
+
+        if (( esp_mounted_here )) &&
+           [[ -n "$ESP_MOUNT" ]] &&
+           mountpoint -q "$MNT$ESP_MOUNT"; then
+            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
+            TARGET_ESP_MOUNTED=0
+        fi
+
+        return 1
+    fi
+
+    if ! bind_chroot_runtime_mount /run "$MNT/run"; then
+        restore_dns || true
+        cleanup_chroot_mounts
+
+        if (( esp_mounted_here )) &&
+           [[ -n "$ESP_MOUNT" ]] &&
+           mountpoint -q "$MNT$ESP_MOUNT"; then
+            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
+            TARGET_ESP_MOUNTED=0
+        fi
+
         return 1
     fi
 
@@ -201,6 +295,7 @@ prepare_chroot() {
 
 linuxre_chroot() {
     local target="$1"
+
     shift
 
     if [[ ! -d "$target" ]]; then
@@ -221,11 +316,12 @@ linuxre_chroot() {
 # ==================================================
 
 enter_chroot() {
-
     local status
     local cleanup_status=0
 
-    prepare_chroot || return 1
+    if ! prepare_chroot; then
+        return 1
+    fi
 
     echo
     echo "========================================"
@@ -234,11 +330,15 @@ enter_chroot() {
     echo
 
     arch-chroot "$MNT"
-
     status=$?
 
-    restore_dns || cleanup_status=1
-    cleanup_chroot_mounts || cleanup_status=1
+    if ! restore_dns; then
+        cleanup_status=1
+    fi
+
+    if ! cleanup_chroot_mounts; then
+        cleanup_status=1
+    fi
 
     echo
 

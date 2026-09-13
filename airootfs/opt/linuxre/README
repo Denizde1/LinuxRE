@@ -13,5 +13,4 @@ Features:
 - Automatic Repair
 - Systemd Repair
 - Kernel Repair
-- Integrated diagnostics: storage, LUKS/LVM, snapshots, boot, fstab, packages, network, users, journal
-- Complete privacy-restricted recovery reports
+- Firefox comes in box

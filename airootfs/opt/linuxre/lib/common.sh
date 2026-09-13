@@ -3,7 +3,14 @@
 set -uo pipefail
 
 MNT="${MNT:-/mnt}"
-TMP="${TMP:-$MNT/.linuxre}"
+
+# Keep LinuxRE temporary files outside the target filesystem mount.
+# The target root is mounted at $MNT, so storing TMP below $MNT
+# would make the temporary directory disappear behind the mount.
+TMP="${TMP:-/tmp/.linuxre}"
+
+# Ensure the temporary LinuxRE working directory exists.
+mkdir -p "$TMP" 2>/dev/null || true
 
 # ==================================================
 # Logging

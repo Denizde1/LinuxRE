@@ -1,0 +1,13 @@
+{
+  "policies": {
+    "Permissions": {
+      "Autoplay": {
+        "Allow": [
+          "https://www.youtube.com",
+          "https://youtu.be"
+        ],
+        "Default": "allow-audio-video"
+      }
+    }
+  }
+}
