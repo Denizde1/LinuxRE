@@ -200,17 +200,22 @@ verify_package_integrity() {
 
     local output
     local packages
+    local status=0
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-        warn "Package integrity check failed."
-        return 1
-    }
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    status=$?
 
-    packages="$(printf '%s\n' "$output" | parse_pacman_integrity_output)"
+    if [[ -n "$output" ]]; then
+        packages="$(printf '%s\n' "$output" | parse_pacman_integrity_output)"
+    fi
 
     if [[ -n "$packages" ]]; then
-
         warn "Package integrity problems were detected in: $packages"
+        return 1
+    fi
+
+    if (( status != 0 )); then
+        warn "Package integrity check failed without identifying damaged packages."
         return 1
     fi
 
@@ -227,6 +232,7 @@ repair_package_integrity() {
     local output
     local packages
     local package
+    local status=0
 
     echo
     echo "========================================"
@@ -236,17 +242,22 @@ repair_package_integrity() {
 
     log "Checking installed packages..."
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-        warn "Package integrity check failed; repair package list is unavailable."
-        return 1
-    }
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    status=$?
 
-    packages="$(
-        printf '%s\n' "$output" |
-        parse_pacman_integrity_output
-    )"
+    if [[ -n "$output" ]]; then
+        packages="$(
+            printf '%s\n' "$output" |
+            parse_pacman_integrity_output
+        )"
+    fi
 
     if [[ -z "$packages" ]]; then
+        if (( status != 0 )); then
+            warn "Package integrity check failed without identifying damaged packages."
+            return 1
+        fi
+
         ok "No packages require repair."
         return 0
     fi

@@ -1,7 +1,7 @@
 [Unit]
-Description=Set LinuxRE DNS
-After=NetworkManager.service
-Wants=NetworkManager.service
+Description=Apply LinuxRE DNS overrides when explicitly requested
+After=NetworkManager-wait-online.service network-online.target
+Wants=NetworkManager-wait-online.service network-online.target
 
 [Service]
 Type=oneshot
