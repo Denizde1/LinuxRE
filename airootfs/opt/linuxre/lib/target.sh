@@ -743,9 +743,12 @@ set_root() {
     TARGET_LVM_VG="$selected_vg"
     TARGET_LUKS_MAPPER=""
 
-    if [[ "$ROOT_DEV" =~ ^/dev/([A-Za-z0-9_.-]+)/[A-Za-z0-9_.-]+$ ]]; then
+    # LVM LV paths are normally /dev/<vg>/<lv>. Skip mapper aliases such as
+    # /dev/mapper/<vg>-<lv> because they are not the underlying VG name.
+    if [[ "$ROOT_DEV" =~ ^/dev/([^/]+)/([^/]+)$ ]] &&
+       [[ "$ROOT_DEV" != /dev/mapper/* ]]; then
         base_name="${ROOT_DEV#/dev/}"
-        if [[ "$base_name" == *"/"* ]]; then
+        if [[ "$base_name" == */* ]]; then
             TARGET_LVM_VG="${base_name%%/*}"
         fi
     fi
@@ -1003,7 +1006,8 @@ detect_esp() {
     if [[ -f "$fstab" ]]; then
         while read -r spec mountpoint _; do
             [[ "$mountpoint" == "/boot" ||
-               "$mountpoint" == "/efi" ]] || continue
+               "$mountpoint" == "/efi" ||
+               "$mountpoint" == "/boot/efi" ]] || continue
 
             candidate="$(resolve_fstab_device "$spec" 2>/dev/null || true)"
 
@@ -1121,6 +1125,20 @@ detect_esp_mount() {
         ' "$fstab"; then
 
             ESP_MOUNT="/efi"
+            return 0
+        fi
+
+        if awk '
+            /^[[:space:]]*#/ { next }
+            $2 == "/boot/efi" {
+                found=1
+            }
+            END {
+                exit !found
+            }
+        ' "$fstab"; then
+
+            ESP_MOUNT="/boot/efi"
             return 0
         fi
 

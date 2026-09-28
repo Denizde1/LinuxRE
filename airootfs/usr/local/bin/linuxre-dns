@@ -1,9 +1,34 @@
 #!/bin/bash
 
-for connection in $(nmcli -t -f NAME connection show); do
-    nmcli connection modify "$connection" \
-        ipv4.dns "8.8.8.8" \
-        ipv4.ignore-auto-dns yes
-done
+set -uo pipefail
 
-nmcli connection reload
+# Leave NetworkManager's default resolver behavior in place. A hard-coded
+# override of every connection interferes with DHCP-provided DNS, can run
+# before interfaces are online, and forces NM to reload profiles in a way that
+# can leave the live system in an unusable DNS state until the connection
+# manager is restarted.
+
+# Only apply a custom DNS override when an explicit value is supplied by the
+# environment or an operator; do not silently replace NM's normal resolver
+# configuration.
+if [[ -z "${LINUXRE_DNS:-}" ]]; then
+    exit 0
+fi
+
+if ! command -v nmcli >/dev/null 2>&1; then
+    exit 0
+fi
+
+# Avoid modifying profiles before the interface is online and connected.
+if ! nmcli -t -f DEVICE,STATE device status 2>/dev/null |
+    awk '$2 == "connected" { found = 1 } END { exit !found }'; then
+    exit 0
+fi
+
+for connection in $(nmcli -t -f NAME connection show 2>/dev/null); do
+    nmcli connection modify "$connection" \
+        ipv4.dns "$LINUXRE_DNS" \
+        ipv4.ignore-auto-dns yes
+    done
+
+nmcli connection reload >/dev/null 2>&1 || true

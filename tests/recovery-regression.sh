@@ -63,6 +63,31 @@ cat > "$BIN_DIR/cryptsetup" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
+cat > "$BIN_DIR/blkid" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"-s TYPE"* ]]; then
+    echo ext4
+    exit 0
+fi
+if [[ "$*" == *"-s UUID"* ]]; then
+    echo 11111111-2222-3333-4444-555555666666
+    exit 0
+fi
+exit 0
+EOF
+cat > "$BIN_DIR/lvs" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$*" == *"--select"* ]]; then
+    echo vg
+    exit 0
+fi
+exit 0
+EOF
+cat > "$BIN_DIR/pacman" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'warning: filesystem: 100 total files, 2 missing files'
+exit 1
+EOF
 chmod +x "$BIN_DIR"/*
 
 export PATH="$BIN_DIR:$PATH"
@@ -85,6 +110,22 @@ source "$LIB_DIR/target.sh"
 source "$LIB_DIR/chroot.sh"
 # shellcheck disable=SC1091
 source "$LIB_DIR/repair.sh"
+
+mkdir -p "$MNT/etc"
+printf '%s\n' 'UUID=deadbeef /boot/efi vfat defaults 0 2' > "$MNT/etc/fstab"
+ESP_MOUNT=""
+detect_esp_mount
+assert_true "ESP detection respects /boot/efi mountpoints" test "$ESP_MOUNT" = "/boot/efi"
+
+ROOT_DEV="/dev/mapper/vg-lv"
+TARGET_LVM_VG=""
+base_name="${ROOT_DEV#/dev/}"
+if [[ "$ROOT_DEV" =~ ^/dev/([^/]+)/([^/]+)$ ]] && [[ "$ROOT_DEV" != /dev/mapper/* ]]; then
+    if [[ "$base_name" == */* ]]; then
+        TARGET_LVM_VG="${base_name%%/*}"
+    fi
+fi
+assert_true "mapper aliases do not masquerade as LVM volume groups" test -z "$TARGET_LVM_VG"
 
 sample_output=$'warning: filesystem: 100 total files, 2 missing files\nwarning: systemd: 120 total files, 1 altered file\nwarning: healthy: 10 total files, 0 missing files\nwarning: unrelated warning text'
 packages="$(printf '%s\n' "$sample_output" | parse_pacman_integrity_output)"
@@ -136,6 +177,25 @@ if grep -R -- '--repair' "$ROOT_DIR/airootfs/opt/linuxre/lib/fsck.sh" \
 else
     pass_test "Btrfs repair remains disabled"
 fi
+assert_file_contains "DNS override stays opt-in" 'LINUXRE_DNS' \
+    "$ROOT_DIR/airootfs/usr/local/bin/linuxre-dns"
+if grep -q '8\.8\.8\.8' "$ROOT_DIR/airootfs/usr/local/bin/linuxre-dns"; then
+    fail_test "DNS override no longer hard-codes Google DNS"
+else
+    pass_test "DNS override no longer hard-codes Google DNS"
+fi
+assert_file_contains "DNS service waits for network readiness" 'network-online.target' \
+    "$ROOT_DIR/airootfs/etc/systemd/system/linuxre-dns.service"
+
+linuxre_chroot() {
+    env LC_ALL=C pacman -Qkk 2>&1
+}
+if verify_package_integrity >/dev/null 2>&1; then
+    fail_test "integrity checks respect pacman damage exit codes"
+else
+    pass_test "integrity checks respect pacman damage exit codes"
+fi
+
 assert_file_contains "cleanup trap preserves primary status" 'trap cleanup_on_exit EXIT' \
     "$ROOT_DIR/airootfs/opt/linuxre/scripts/automatic-repair.sh"
 assert_file_contains "report failure blocks PASS" 'required report could not be written' \
