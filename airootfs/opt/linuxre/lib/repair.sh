@@ -49,7 +49,8 @@ detect_kernel() {
         vmlinuz-linux-zen \
         vmlinuz-linux-hardened
     do
-        if [[ -f "$MNT$ESP_MOUNT/$kernel" ]]; then
+        if [[ -f "$MNT/boot/$kernel" ||
+              ( -n "$ESP_MOUNT" && -f "$MNT$ESP_MOUNT/$kernel" ) ]]; then
             echo "$kernel"
             return 0
         fi
@@ -198,8 +199,8 @@ verify_package_integrity() {
 
     log "Checking package integrity..."
 
-    local output
-    local packages
+    local output=""
+    local packages=""
     local status=0
 
     output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
@@ -229,9 +230,9 @@ verify_package_integrity() {
 # ==================================================
 
 repair_package_integrity() {
-    local output
-    local packages
-    local package
+    local output=""
+    local packages=""
+    local package=""
     local status=0
 
     echo
@@ -289,15 +290,17 @@ repair_package_integrity() {
 
     log "Verifying package integrity after reinstall..."
 
-    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-        warn "Post-repair package integrity check failed."
-        return 1
-    }
-
+    output="$(linuxre_chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+    status=$?
     packages="$(printf '%s\n' "$output" | parse_pacman_integrity_output)"
 
     if [[ -n "$packages" ]]; then
         warn "Package integrity problems remain after repair: $packages"
+        return 1
+    fi
+
+    if (( status != 0 )); then
+        warn "Post-repair package integrity check failed without identifying damaged packages."
         return 1
     fi
 

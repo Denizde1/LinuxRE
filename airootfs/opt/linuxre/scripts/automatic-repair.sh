@@ -60,6 +60,7 @@ write_repair_report() {
 
     if ! chmod 600 "$REPORT_FILE_PATH" 2>/dev/null; then
         warn "Unable to restrict repair report permissions: $REPORT_FILE_PATH"
+        return 1
     fi
 
     log "Repair report written to $REPORT_FILE_PATH"
@@ -258,17 +259,25 @@ fi
 # System update
 # ==================================================
 
-echo "Updating the target system..."
-echo
+echo "A full package-system upgrade is optional and may change packages unrelated to the repair."
+read -r -p "Run a full target system upgrade before repair? [y/N]: " update_confirm || update_confirm=""
 
-if ensure_target; then
-    if linuxre_chroot "$MNT" pacman -Syu --noconfirm; then
-        ok "System update completed successfully."
+if [[ "${update_confirm,,}" == "y" || "${update_confirm,,}" == "yes" ]]; then
+    echo
+    echo "Updating the target system..."
+    echo
+
+    if ensure_target; then
+        if linuxre_chroot "$MNT" pacman -Syu --noconfirm; then
+            ok "System update completed successfully."
+        else
+            warn "System update failed. Continuing with repair..."
+        fi
     else
-        warn "System update failed. Continuing with repair..."
+        warn "Target could not be prepared for system update."
     fi
 else
-    warn "Target could not be prepared for system update."
+    log "Skipping optional full system upgrade."
 fi
 
 # ==================================================

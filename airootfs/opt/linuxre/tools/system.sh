@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -uo pipefail
+
 while true; do
     clear
 
@@ -24,7 +26,10 @@ while true; do
     echo "  0) Back"
     echo
 
-    read -rp "Select an option: " c
+    if ! read -rp "Select an option: " c; then
+        echo
+        exit 0
+    fi
 
     case "$c" in
         1) btop ;;
@@ -37,8 +42,16 @@ while true; do
         8) sudo bash /opt/linuxre/tools/logs.sh ;;
         9) sudo bash /opt/linuxre/scripts/system-repair.sh ;;
         10) bash /opt/linuxre/tools/diagnostics.sh ;;
-        11) clear; sudo system_information; read -r -p "Press Enter to continue..." _ ;;
-        13) clear; sudo journal_diagnostics; read -r -p "Press Enter to continue..." _ ;;
+        11)
+            clear
+            sudo bash -c 'source /opt/linuxre/lib/diagnostics.sh; trap cleanup EXIT; system_information'
+            read -r -p "Press Enter to continue..." _
+            ;;
+        13)
+            clear
+            sudo bash -c 'source /opt/linuxre/lib/diagnostics.sh; trap cleanup EXIT; journal_diagnostics'
+            read -r -p "Press Enter to continue..." _
+            ;;
         12) sudo bash /opt/linuxre/tools/help.sh ;;
         0) exit 0 ;;
         *) echo "Invalid option."; sleep 1 ;;

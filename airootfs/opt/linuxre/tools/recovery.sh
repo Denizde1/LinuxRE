@@ -4,6 +4,7 @@ set -uo pipefail
 
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/diagnostics.sh
+trap cleanup EXIT
 
 while true; do
     clear
@@ -30,7 +31,10 @@ while true; do
     echo "  0) Back"
     echo
 
-    read -rp "Select an option: " c
+    if ! read -rp "Select an option: " c; then
+        echo
+        exit 0
+    fi
 
     case "$c" in
         1)
@@ -204,7 +208,7 @@ while true; do
 
         12)
             clear
-            write_report
+            sudo bash -c 'source /opt/linuxre/lib/diagnostics.sh; trap cleanup EXIT; write_report'
             read -r -p "Press Enter to continue..." _
             ;;
 
@@ -218,4 +222,3 @@ while true; do
             ;;
     esac
 done
-

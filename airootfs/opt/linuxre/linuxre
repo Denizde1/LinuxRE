@@ -4,7 +4,7 @@ while true; do
 
 
     echo "╔══════════════════════════════════════════╗"
-    echo "║               LinuxRE v0.9               ║"
+    echo "║             LinuxRE v0.9-rc1             ║"
     echo "║        Linux Recovery Environment        ║"
     echo "╚══════════════════════════════════════════╝"
     echo
@@ -21,7 +21,10 @@ while true; do
     echo "  0) Power Off"
     echo
 
-    read -rp "Select an option: " c
+    if ! read -rp "Select an option: " c; then
+        echo
+        exit 0
+    fi
 
     case "$c" in
         1) bash /opt/linuxre/tools/disk.sh ;;

@@ -4,13 +4,16 @@ set -uo pipefail
 
 MNT="${MNT:-/mnt}"
 
-# Keep LinuxRE temporary files outside the target filesystem mount.
-# The target root is mounted at $MNT, so storing TMP below $MNT
-# would make the temporary directory disappear behind the mount.
-TMP="${TMP:-/tmp/.linuxre}"
-
-# Ensure the temporary LinuxRE working directory exists.
-mkdir -p "$TMP" 2>/dev/null || true
+# Allocate a private directory rather than trusting the generic TMP variable.
+# Cleanup removes this directory, so its location must never come from the
+# caller's environment.
+if ! declare -p LINUXRE_TMP_DIR 2>/dev/null | grep -q '^declare -r'; then
+    if ! LINUXRE_TMP_DIR="$(mktemp -d /tmp/linuxre.XXXXXXXX)"; then
+        printf '[ERROR] Failed to create LinuxRE temporary directory.\n' >&2
+        return 1
+    fi
+    readonly LINUXRE_TMP_DIR
+fi
 
 # ==================================================
 # Logging
@@ -74,8 +77,22 @@ require_commands() {
 # ==================================================
 
 cleanup() {
-    if [[ -d "$TMP" ]]; then
-        rm -rf "$TMP" 2>/dev/null || true
+    case "$LINUXRE_TMP_DIR" in
+        /tmp/linuxre.*)
+            ;;
+        *)
+            warn "Refusing to remove an unexpected LinuxRE temporary path."
+            return 1
+            ;;
+    esac
+
+    if [[ -L "$LINUXRE_TMP_DIR" ]]; then
+        warn "Refusing to remove a symbolic link in place of the LinuxRE temporary directory."
+        return 1
+    fi
+
+    if [[ -d "$LINUXRE_TMP_DIR" ]]; then
+        rm -rf -- "$LINUXRE_TMP_DIR" 2>/dev/null || return 1
     fi
 }
 

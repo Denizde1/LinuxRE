@@ -2,6 +2,9 @@
 
 set -uo pipefail
 
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/imaging.sh
+
 if [[ "$EUID" -ne 0 ]]; then
     echo "Error: Image restore must be run as root." >&2
     exit 1
@@ -26,15 +29,35 @@ echo
 read -rp "System image path (example: /mnt/backup/system.img): " image
 read -rp "Target disk or partition (example: /dev/nvme0n1): " target
 
-if [[ ! -f "$image" ]]; then
+if [[ -L "$image" || ! -f "$image" ]]; then
     echo
-    echo "Error: Image file does not exist."
+    echo "Error: Image must be an existing regular, non-symlink file."
     exit 1
 fi
 
 if [[ ! -b "$target" ]]; then
     echo
     echo "Error: Target device does not exist."
+    exit 1
+fi
+
+if imaging_device_is_mounted "$target"; then
+    echo
+    echo "Error: Target device or one of its partitions is mounted."
+    echo "Unmount the target and all child filesystems before restoring an image."
+    exit 1
+else
+    target_status=$?
+    if (( target_status == 2 )); then
+        echo "Error: Unable to inspect target device mount state."
+        exit 1
+    fi
+fi
+
+map="$(imaging_map_path restore "$image" "$target")" || exit 1
+map_dir="$(dirname "$map")"
+if [[ ! -d "$map_dir" || ! -w "$map_dir" ]]; then
+    echo "Error: Map file directory does not exist or is not writable: $map_dir"
     exit 1
 fi
 
@@ -71,8 +94,6 @@ fi
 echo
 echo "Restoring system image..."
 echo
-
-map="${image}.restore.map"
 
 ddrescue --force "$image" "$target" "$map"
 
