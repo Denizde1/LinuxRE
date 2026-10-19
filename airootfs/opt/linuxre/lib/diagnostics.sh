@@ -7,7 +7,7 @@ source /opt/linuxre/lib/common.sh
 # shellcheck disable=SC1091
 source /opt/linuxre/lib/target.sh
 
-LINUXRE_VERSION="${LINUXRE_VERSION:-0.8}"
+LINUXRE_VERSION="${LINUXRE_VERSION:-0.9-rc1}"
 REPORT_MODE="${REPORT_MODE:-0}"
 
 diagnostics_section() {
@@ -194,6 +194,8 @@ fstab_diagnostics() {
 package_diagnostics() {
     diagnostics_section "Pacman diagnostics"
     local cache="${MNT:-/mnt}/var/cache/pacman/pkg"
+    local output
+    local status=0
     if [[ -d "$cache" ]]; then
         printf 'Cached packages: %s\n' "$(find "$cache" -maxdepth 1 -type f -name '*.pkg.tar.*' | wc -l)"
         find "$cache" -maxdepth 1 -type f -name '*.pkg.tar.*' -printf '  %f\n' | sort
@@ -201,13 +203,16 @@ package_diagnostics() {
         printf 'Package cache unavailable: %s\n' "$cache"
     fi
     if [[ -d "${MNT:-/mnt}" ]] && mountpoint -q "${MNT:-/mnt}" 2>/dev/null; then
-        local output
-        output="$(arch-chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)" || {
-            printf 'Package integrity check failed.\n'
-            return 0
-        }
-        printf '%s\n' "$output" |
-            awk '/missing files|altered files/ && !/0 missing files|0 altered files/ { print "  " $0 }'
+        output="$(arch-chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
+        status=$?
+        if [[ -n "$output" ]]; then
+            printf '%s\n' "$output" |
+                awk '/missing files?|altered files?/ && !/0 missing files|0 altered files/ { print "  " $0 }'
+        fi
+
+        if (( status != 0 )); then
+            printf 'Package integrity command exited with status %s; see the findings above.\n' "$status"
+        fi
     else
         printf 'Target is not mounted; package integrity check skipped.\n'
     fi
@@ -267,7 +272,7 @@ write_report() {
     local report="${1:-${REPORT_FILE_PATH:-/var/log/linuxre-report.txt}}"
     mkdir -p "$(dirname "$report")" || return 1
     REPORT_MODE=1
-    {
+    if ! {
         printf 'LinuxRE %s Recovery Report\n' "$LINUXRE_VERSION"
         printf 'Generated: %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
         system_information
@@ -280,8 +285,17 @@ write_report() {
         network_diagnostics
         user_diagnostics
         journal_diagnostics
-    } > "$report"
+    } > "$report"; then
+        REPORT_MODE=0
+        printf 'Unable to write recovery report: %s\n' "$report" >&2
+        return 1
+    fi
     REPORT_MODE=0
-    chmod 600 "$report"
+
+    if ! chmod 600 "$report"; then
+        printf 'Unable to restrict recovery report permissions: %s\n' "$report" >&2
+        return 1
+    fi
+
     printf 'Recovery report written to %s\n' "$report"
 }

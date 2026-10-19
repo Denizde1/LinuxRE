@@ -13,7 +13,10 @@ while true; do
     echo "  0) Back"
     echo
 
-    read -rp "Select an option: " c
+    if ! read -rp "Select an option: " c; then
+        echo
+        exit 0
+    fi
 
     case "$c" in
         1)
@@ -48,7 +51,7 @@ while true; do
             echo "Filesystem: ${fstype:-Unknown}"
             echo
 
-            read -rp "Run filesystem check on this device? (y/n): " confirm
+            read -rp "Run read-only filesystem check on this device? (y/n): " confirm
 
             if [[ "$confirm" != "y" ]]; then
                 echo "Check cancelled."
@@ -56,41 +59,13 @@ while true; do
                 continue
             fi
 
-            case "$fstype" in
-                ext2|ext3|ext4)
-                    sudo fsck -f "$device"
-                    ;;
-
-                btrfs)
-                    echo "Btrfs check is read-only; automatic Btrfs repair is disabled."
-                    sudo btrfs check --readonly "$device"
-                    ;;
-
-                xfs)
-                    echo "XFS filesystem detected."
-                    echo "Use xfs_repair for repair operations."
-                    ;;
-
-                f2fs)
-                    sudo fsck.f2fs "$device"
-                    ;;
-
-                vfat)
-                    sudo fsck.fat -a "$device"
-                    ;;
-
-                exfat)
-                    sudo fsck.exfat "$device"
-                    ;;
-
-                ntfs|ntfs3)
-                    sudo ntfsfix "$device"
-                    ;;
-
-                *)
-                    echo "Unsupported or unknown filesystem: ${fstype:-unknown}"
-                    ;;
-            esac
+            sudo bash -c '
+                set -uo pipefail
+                source /opt/linuxre/lib/common.sh
+                source /opt/linuxre/lib/fsck.sh
+                trap cleanup_on_exit EXIT
+                check_filesystem "$1" "$2"
+            ' bash "$device" "$fstype"
 
             echo
             read -rp "Press Enter to continue..." _

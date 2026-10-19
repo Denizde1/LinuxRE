@@ -2,6 +2,12 @@
 
 set -uo pipefail
 
+e2fsck_status_is_acceptable() {
+    local status="${1:-}"
+    [[ "$status" =~ ^[0-9]+$ ]] || return 1
+    (( (status & ~3) == 0 ))
+}
+
 # ==================================================
 # Filesystem check
 # ==================================================
@@ -61,12 +67,12 @@ check_filesystem() {
             ;;
 
         xfs)
-            warn "Automatic XFS repair is not supported."
+            warn "Read-only XFS checking is not available in this workflow."
             return 2
             ;;
 
         ntfs|ntfs3)
-            warn "Automatic NTFS repair is not supported."
+            warn "Read-only NTFS checking is not available in this workflow."
             return 2
             ;;
 
@@ -103,6 +109,13 @@ repair_filesystem() {
             require_commands fsck || return 1
             fsck -fy "$device"
             repair_status=$?
+            if ! e2fsck_status_is_acceptable "$repair_status"; then
+                warn "Filesystem repair returned status $repair_status for $device."
+                return 1
+            fi
+            if (( (repair_status & 2) != 0 )); then
+                warn "Filesystem repair indicates the target system should be rebooted."
+            fi
             ;;
 
         f2fs)
@@ -144,7 +157,8 @@ repair_filesystem() {
             ;;
     esac
 
-    if (( repair_status != 0 )); then
+    if (( repair_status != 0 )) &&
+       [[ "$fstype" != ext2 && "$fstype" != ext3 && "$fstype" != ext4 ]]; then
         warn "Filesystem repair returned status $repair_status for $device."
         return 1
     fi

@@ -14,18 +14,18 @@ source /opt/linuxre/lib/target.sh
 
 prepare_dns() {
     local target_resolv="$MNT/etc/resolv.conf"
-    local backup="$TMP/resolv.conf.backup"
-    local missing="$TMP/resolv.conf.backup.missing"
+    local backup="$LINUXRE_TMP_DIR/resolv.conf.backup"
+    local missing="$LINUXRE_TMP_DIR/resolv.conf.backup.missing"
 
     if [[ ! -d "$MNT/etc" ]]; then
         warn "Target /etc directory does not exist."
         return 1
     fi
 
-    # TMP must not depend on the target root mount.
+    # The temporary directory must not depend on the target root mount.
     # Re-create it in case it was cleaned earlier.
-    if ! mkdir -p "$TMP" 2>/dev/null; then
-        warn "Failed to create LinuxRE temporary directory: $TMP"
+    if ! mkdir -p "$LINUXRE_TMP_DIR" 2>/dev/null; then
+        warn "Failed to create LinuxRE temporary directory: $LINUXRE_TMP_DIR"
         return 1
     fi
 
@@ -76,8 +76,8 @@ prepare_dns() {
 
 restore_dns() {
     local target_resolv="$MNT/etc/resolv.conf"
-    local backup="$TMP/resolv.conf.backup"
-    local missing="$TMP/resolv.conf.backup.missing"
+    local backup="$LINUXRE_TMP_DIR/resolv.conf.backup"
+    local missing="$LINUXRE_TMP_DIR/resolv.conf.backup.missing"
 
     # If the target filesystem is no longer mounted, there is
     # nothing safe to restore here.
@@ -194,8 +194,8 @@ prepare_chroot() {
 
     # Ensure the temporary directory exists before touching
     # anything inside the target root.
-    if ! mkdir -p "$TMP" 2>/dev/null; then
-        warn "Failed to create LinuxRE temporary directory: $TMP"
+    if ! mkdir -p "$LINUXRE_TMP_DIR" 2>/dev/null; then
+        warn "Failed to create LinuxRE temporary directory: $LINUXRE_TMP_DIR"
         return 1
     fi
 

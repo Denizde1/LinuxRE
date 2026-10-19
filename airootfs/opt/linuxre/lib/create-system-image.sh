@@ -2,6 +2,9 @@
 
 set -uo pipefail
 
+# shellcheck disable=SC1091
+source /opt/linuxre/lib/imaging.sh
+
 if [[ "$EUID" -ne 0 ]]; then
     echo "Error: Disk imaging must be run as root." >&2
     exit 1
@@ -39,8 +42,12 @@ if [[ -z "$image" ]]; then
     exit 1
 fi
 
-map="${image}.map"
 destination_dir="$(dirname "$image")"
+if ! imaging_output_path_is_safe "$image"; then
+    exit 1
+fi
+
+map="$(imaging_map_path create "$source" "$image")" || exit 1
 
 echo
 source_size="$(blockdev --getsize64 "$source" 2>/dev/null || lsblk -dnbo SIZE "$source" 2>/dev/null || echo 0)"
@@ -53,7 +60,7 @@ echo "Image  : $image"
 echo "Map    : $map"
 echo
 
-if findmnt -rn -S "$source" >/dev/null 2>&1; then
+if imaging_device_is_mounted "$source"; then
     echo "WARNING: Source device appears to be mounted."
     echo
     findmnt -rn -S "$source"
@@ -64,9 +71,15 @@ if findmnt -rn -S "$source" >/dev/null 2>&1; then
         echo "Cancelled."
         exit 0
     fi
+else
+    source_status=$?
+    if (( source_status == 2 )); then
+        echo "Error: Unable to inspect source device mount state."
+        exit 1
+    fi
 fi
 
-if [[ -e "$image" ]]; then
+if [[ -f "$image" ]]; then
     echo "WARNING: Destination image already exists."
     echo
     read -rp "Overwrite it? [y/N]: " overwrite
@@ -77,16 +90,20 @@ if [[ -e "$image" ]]; then
     fi
 fi
 
-if [[ "$source" == "$image" ]]; then
-    echo
-    echo "Error: Source and destination cannot be the same."
-    exit 1
-fi
-
 mkdir -p "$destination_dir" || {
     echo "Error: Could not access destination directory."
     exit 1
 }
+
+if [[ ! -w "$destination_dir" ]]; then
+    echo "Error: Destination directory is not writable: $destination_dir"
+    exit 1
+fi
+
+if [[ ! -w "$(dirname "$map")" ]]; then
+    echo "Error: Map file directory is not writable: $(dirname "$map")"
+    exit 1
+fi
 
 echo
 echo "Select imaging mode:"

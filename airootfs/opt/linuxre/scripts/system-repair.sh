@@ -221,7 +221,10 @@ while true; do
     echo "────────────────────────────────────────────"
     echo
 
-    read -rp "Select an option [1-6]: " option
+    if ! read -rp "Select an option [1-6]: " option; then
+        echo
+        exit 0
+    fi
 
     case "$option" in
         1)

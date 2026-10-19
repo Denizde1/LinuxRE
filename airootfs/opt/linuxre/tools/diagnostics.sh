@@ -25,7 +25,7 @@ echo "LinuxRE Read-Only Diagnostics"
 echo "No mount, repair, unlock, activation, or write operation is performed."
 
 section "LinuxRE"
-echo "Version: ${LINUXRE_VERSION:-unknown}"
+echo "Version: ${LINUXRE_VERSION:-0.9-rc1}"
 echo "Kernel:  $(uname -r 2>/dev/null || echo unknown)"
 echo "Boot mode: $(if [[ -d /sys/firmware/efi ]]; then echo UEFI; else echo legacy/non-UEFI; fi)"
 

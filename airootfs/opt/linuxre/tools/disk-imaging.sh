@@ -15,7 +15,10 @@ while true; do
     echo "4) Back"
     echo
 
-    read -rp "Select an option: " choice
+    if ! read -rp "Select an option: " choice; then
+        echo
+        exit 0
+    fi
 
     case "$choice" in
         1)
