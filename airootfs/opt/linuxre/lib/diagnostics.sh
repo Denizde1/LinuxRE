@@ -194,27 +194,11 @@ fstab_diagnostics() {
 package_diagnostics() {
     diagnostics_section "Pacman diagnostics"
     local cache="${MNT:-/mnt}/var/cache/pacman/pkg"
-    local output
-    local status=0
     if [[ -d "$cache" ]]; then
         printf 'Cached packages: %s\n' "$(find "$cache" -maxdepth 1 -type f -name '*.pkg.tar.*' | wc -l)"
         find "$cache" -maxdepth 1 -type f -name '*.pkg.tar.*' -printf '  %f\n' | sort
     else
         printf 'Package cache unavailable: %s\n' "$cache"
-    fi
-    if [[ -d "${MNT:-/mnt}" ]] && mountpoint -q "${MNT:-/mnt}" 2>/dev/null; then
-        output="$(arch-chroot "$MNT" env LC_ALL=C pacman -Qkk 2>&1)"
-        status=$?
-        if [[ -n "$output" ]]; then
-            printf '%s\n' "$output" |
-                awk '/missing files?|altered files?/ && !/0 missing files|0 altered files/ { print "  " $0 }'
-        fi
-
-        if (( status != 0 )); then
-            printf 'Package integrity command exited with status %s; see the findings above.\n' "$status"
-        fi
-    else
-        printf 'Target is not mounted; package integrity check skipped.\n'
     fi
 }
 

@@ -34,7 +34,7 @@ while true; do
         3)
             read -rp "Host or IP: " h
             if [[ -n "$h" ]]; then
-                ping -c 4 "$h"
+                ping -c 4 -- "$h"
             fi
             read -rp "Press Enter to continue..." _
             ;;

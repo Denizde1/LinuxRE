@@ -19,8 +19,11 @@ remote tag has been created.
 - Made NetworkManager the sole enabled network manager, removed the unused
   standalone iwd dependency, and removed stale activation links for networkd,
   cloud-init, VM guest, and PC/SC services.
-- Preserved package-integrity findings when `pacman -Qkk` returns status 1,
-  including in the diagnostic report.
+- Removed Package Integrity checks and automatic package reinstall attempts.
+  `pacman -Qkk` findings could be misleading across target, live, symlink, and
+  package-database states—for example, reporting an installed `systemd` package
+  as missing—so they are no longer used to diagnose or repair a system;
+  package-cache diagnostics remain available.
 - Detect classic kernels under `/boot` when the EFI System Partition is mounted
   separately.
 - Treat e2fsck's documented "errors corrected" and "reboot required" status
@@ -39,9 +42,11 @@ remote tag has been created.
 ## Validation and limitations
 
 The repository regression script includes mocked checks for cleanup isolation,
-device-tree overlap/mount detection, package-integrity status handling,
-kernel placement, symlink destinations, and SSH/version configuration. These
-tests do not perform writes to real block devices.
+device-tree overlap/mount detection, package-cache diagnostics, kernel placement,
+symlink destinations, and SSH/version configuration. It also checks that
+pre-mounted targets match the selected filesystem and that chroot mounts remain
+tracked after partial setup failures. These tests do not perform writes to real
+block devices.
 
 LinuxRE remains UEFI-only. Btrfs checking is read-only and automatic Btrfs,
 XFS, VFAT, exFAT, and NTFS repair is not provided by the automatic-repair
