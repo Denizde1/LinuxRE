@@ -76,9 +76,12 @@ done
 # ==================================================
 
 while true; do
-    read -rp \
+    if ! read -rp \
         "Select Arch Linux root filesystem [1-${#ROOTS[@]}]: " \
-        choice
+        choice; then
+        warn "No root filesystem selection was provided."
+        exit 1
+    fi
 
     if [[ "$choice" =~ ^[0-9]+$ ]] &&
        (( choice >= 1 && choice <= ${#ROOTS[@]} )); then

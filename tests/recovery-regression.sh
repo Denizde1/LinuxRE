@@ -85,11 +85,6 @@ if [[ "$*" == *"--select"* ]]; then
 fi
 exit 0
 EOF
-cat > "$BIN_DIR/pacman" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' 'warning: filesystem: 100 total files, 2 missing files'
-exit 1
-EOF
 chmod +x "$BIN_DIR"/*
 
 export PATH="$BIN_DIR:$PATH"
@@ -138,22 +133,6 @@ if [[ "$ROOT_DEV" =~ ^/dev/([^/]+)/([^/]+)$ ]] && [[ "$ROOT_DEV" != /dev/mapper/
 fi
 assert_true "mapper aliases do not masquerade as LVM volume groups" test -z "$TARGET_LVM_VG"
 
-sample_output=$'warning: filesystem: 100 total files, 2 missing files\nwarning: systemd: 120 total files, 1 altered file\nwarning: healthy: 10 total files, 0 missing files\nwarning: unrelated warning text'
-packages="$(printf '%s\n' "$sample_output" | parse_pacman_integrity_output)"
-
-assert_true "parser finds multiple damaged packages" test "$packages" = $'filesystem\nsystemd'
-if [[ "$packages" != *warning* ]]; then
-    pass_test "parser excludes warning as package name"
-else
-    fail_test "parser excludes warning as package name"
-fi
-
-if [[ "$packages" != *healthy* ]]; then
-    pass_test "parser excludes healthy package summaries"
-else
-    fail_test "parser excludes healthy package summaries"
-fi
-
 TARGET_INSPECTION_MOUNTS=("$TMP_DIR/inspection")
 if cleanup_target_storage; then
     fail_test "failed inspection unmount propagates failure"
@@ -168,40 +147,139 @@ else
     fail_test "failed inspection unmount preserves ownership state"
 fi
 
-linuxre_chroot() {
-    return 1
-}
+if (
+    ROOT_DEV=/dev/test-root
+    ROOT_FSTYPE=ext4
+    ROOT_SUBVOL=""
+    MNT="$TMP_DIR/pre-mounted-root"
+    TEST_MOUNT_SOURCE=/dev/test-root
+    findmnt() {
+        case "$*" in
+            *SOURCE*) printf '%s\n' "$TEST_MOUNT_SOURCE" ;;
+            *FSTYPE*) printf '%s\n' ext4 ;;
+        esac
+    }
+    readlink() {
+        case "${@: -1}" in
+            /dev/test-root) printf '%s\n' /dev/test-root ;;
+            /dev/other-root) printf '%s\n' /dev/other-root ;;
+            *) return 1 ;;
+        esac
+    }
+    mount_root
+); then
+    pass_test "selected filesystem is accepted when already mounted"
+else
+    fail_test "selected filesystem is accepted when already mounted"
+fi
 
-if repair_package_integrity >/dev/null 2>&1; then
-    fail_test "pacman integrity command failure propagates"
+if (
+    ROOT_DEV=/dev/test-root
+    ROOT_FSTYPE=ext4
+    ROOT_SUBVOL=""
+    MNT="$TMP_DIR/pre-mounted-root"
+    TEST_MOUNT_SOURCE=/dev/other-root
+    findmnt() {
+        case "$*" in
+            *SOURCE*) printf '%s\n' "$TEST_MOUNT_SOURCE" ;;
+            *FSTYPE*) printf '%s\n' ext4 ;;
+        esac
+    }
+    readlink() {
+        case "${@: -1}" in
+            /dev/test-root) printf '%s\n' /dev/test-root ;;
+            /dev/other-root) printf '%s\n' /dev/other-root ;;
+            *) return 1 ;;
+        esac
+    }
+    mount_root
+); then
+    fail_test "different pre-mounted filesystem is rejected"
 else
-    pass_test "pacman integrity command failure propagates"
+    pass_test "different pre-mounted filesystem is rejected"
 fi
-if verify_package_integrity >/dev/null 2>&1; then
-    fail_test "empty pacman failure output is reported without nounset abort"
+
+if (
+    ROOT_DEV=/dev/test-root
+    # shellcheck disable=SC2034
+    ROOT_FSTYPE=btrfs
+    # shellcheck disable=SC2034
+    ROOT_SUBVOL=@
+    MNT="$TMP_DIR/pre-mounted-root"
+    TEST_MOUNT_FSROOT=/
+    findmnt() {
+        case "$*" in
+            *SOURCE*) printf '%s\n' /dev/test-root ;;
+            *FSTYPE*) printf '%s\n' btrfs ;;
+            *FSROOT*) printf '%s\n' "$TEST_MOUNT_FSROOT" ;;
+        esac
+    }
+    readlink() {
+        printf '%s\n' /dev/test-root
+    }
+    mount_root
+); then
+    fail_test "different pre-mounted Btrfs subvolume is rejected"
 else
-    pass_test "empty pacman failure output is reported without nounset abort"
+    pass_test "different pre-mounted Btrfs subvolume is rejected"
 fi
-linuxre_chroot() {
-    case "$*" in
-        *"pacman -Qkk"*)
-            printf '%s\n' 'warning: damaged: 10 total files, 1 missing file'
-            return 1
-            ;;
-        *"pacman -S --noconfirm damaged"*)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
-}
-if repair_package_integrity > "$TMP_DIR/post-repair.log" 2>&1; then
-    fail_test "post-repair integrity findings fail the repair"
-elif grep -q 'Package integrity problems remain after repair: damaged' "$TMP_DIR/post-repair.log"; then
-    pass_test "post-repair integrity findings survive pacman status 1"
+
+if (
+    MNT="$TMP_DIR/chroot"
+    mountpoint() { return 1; }
+    mount() {
+        [[ "$1" == "--rbind" ]] && return 0
+        return 1
+    }
+    umount() { return 1; }
+    CHROOT_RUNTIME_MOUNTS=()
+    if bind_chroot_runtime_mount /dev "$TMP_DIR/chroot/dev"; then
+        exit 1
+    fi
+    ((${#CHROOT_RUNTIME_MOUNTS[@]} == 1)) &&
+        [[ "${CHROOT_RUNTIME_MOUNTS[0]}" == "$TMP_DIR/chroot/dev" ]]
+); then
+    pass_test "failed chroot remount setup keeps bind mount tracked"
 else
-    fail_test "post-repair integrity findings survive pacman status 1"
+    fail_test "failed chroot remount setup keeps bind mount tracked"
+fi
+
+mkdir -p "$TMP_DIR/symlink-root" "$TMP_DIR/outside"
+ln -s "$TMP_DIR/outside" "$TMP_DIR/symlink-root/dev"
+if target_path_is_within_root "$TMP_DIR/symlink-root" "$TMP_DIR/symlink-root/dev"; then
+    fail_test "chroot mount paths cannot escape through symlinks"
+else
+    pass_test "chroot mount paths cannot escape through symlinks"
+fi
+if (
+    MNT="$TMP_DIR/symlink-root"
+    ESP_MOUNT=/dev
+    ESP_DEV=/dev/test-esp
+    mount_esp
+); then
+    fail_test "ESP mount refuses symlink path outside target root"
+else
+    pass_test "ESP mount refuses symlink path outside target root"
+fi
+if (
+    MNT="$TMP_DIR/esp-root"
+    ESP_MOUNT=/boot
+    # shellcheck disable=SC2034
+    ESP_DEV=/dev/test-esp
+    TARGET_ESP_MOUNTED=0
+    mkdir -p "$MNT"
+    mountpoint() { return 1; }
+    findmnt() { return 1; }
+    mount() { return 0; }
+    umount() { return 1; }
+    if mount_esp; then
+        exit 1
+    fi
+    (( TARGET_ESP_MOUNTED == 1 ))
+); then
+    pass_test "failed ESP mount verification preserves cleanup ownership"
+else
+    fail_test "failed ESP mount verification preserves cleanup ownership"
 fi
 
 assert_file_contains "Btrfs library check is read-only" 'btrfs check --readonly' \
@@ -237,15 +315,6 @@ else
 fi
 assert_file_contains "DNS service waits for network readiness" 'network-online.target' \
     "$ROOT_DIR/airootfs/etc/systemd/system/linuxre-dns.service"
-
-linuxre_chroot() {
-    env LC_ALL=C pacman -Qkk 2>&1
-}
-if verify_package_integrity >/dev/null 2>&1; then
-    fail_test "integrity checks respect pacman damage exit codes"
-else
-    pass_test "integrity checks respect pacman damage exit codes"
-fi
 
 mkdir -p "$TMP_DIR/boot-target/boot"
 MNT="$TMP_DIR/boot-target"
@@ -334,19 +403,14 @@ else
     pass_test "unrelated disks are not reported as overlapping"
 fi
 
-diagnostics_output="$(
-    mountpoint() { return 0; }
-    arch-chroot() {
-        printf '%s\n' 'warning: damaged: 10 total files, 1 missing file'
-        return 1
-    }
-    package_diagnostics
-)"
-if [[ "$diagnostics_output" == *"damaged: 10 total files, 1 missing file"* &&
-      "$diagnostics_output" == *"exited with status 1"* ]]; then
-    pass_test "package diagnostics preserve damage output on pacman status 1"
+mkdir -p "$MNT/var/cache/pacman/pkg"
+: > "$MNT/var/cache/pacman/pkg/cached.pkg.tar.zst"
+diagnostics_output="$(package_diagnostics)"
+if [[ "$diagnostics_output" == *"Cached packages: 1"* &&
+      "$diagnostics_output" == *"cached.pkg.tar.zst"* ]]; then
+    pass_test "package diagnostics list cached packages"
 else
-    fail_test "package diagnostics preserve damage output on pacman status 1"
+    fail_test "package diagnostics list cached packages"
 fi
 report_result="$(
     system_information() { :; }

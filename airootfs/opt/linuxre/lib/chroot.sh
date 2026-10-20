@@ -17,8 +17,8 @@ prepare_dns() {
     local backup="$LINUXRE_TMP_DIR/resolv.conf.backup"
     local missing="$LINUXRE_TMP_DIR/resolv.conf.backup.missing"
 
-    if [[ ! -d "$MNT/etc" ]]; then
-        warn "Target /etc directory does not exist."
+    if [[ -L "$MNT/etc" || ! -d "$MNT/etc" ]]; then
+        warn "Target /etc must be a real directory."
         return 1
     fi
 
@@ -81,6 +81,10 @@ restore_dns() {
 
     # If the target filesystem is no longer mounted, there is
     # nothing safe to restore here.
+    if [[ -L "$MNT/etc" ]]; then
+        warn "Target /etc must be a real directory."
+        return 1
+    fi
     if [[ ! -d "$MNT/etc" ]]; then
         return 0
     fi
@@ -149,9 +153,18 @@ bind_chroot_runtime_mount() {
     local target="$2"
 
     [[ -n "$source" ]] || return 1
+    if [[ -L "$target" ]] || ! target_path_is_within_root "$MNT" "$target"; then
+        warn "Refusing unsafe chroot mount point: $target"
+        return 1
+    fi
 
     if ! mkdir -p "$target" 2>/dev/null; then
         warn "Failed to create chroot mount point: $target"
+        return 1
+    fi
+
+    if [[ -L "$target" ]] || ! target_path_is_within_root "$MNT" "$target"; then
+        warn "Refusing unsafe chroot mount point: $target"
         return 1
     fi
 
@@ -164,13 +177,12 @@ bind_chroot_runtime_mount() {
         return 1
     fi
 
+    CHROOT_RUNTIME_MOUNTS+=("$target")
+
     if ! mount --make-rslave "$target" 2>/dev/null; then
         warn "Failed to make chroot mount private: $target"
-        umount --recursive "$target" 2>/dev/null || true
         return 1
     fi
-
-    CHROOT_RUNTIME_MOUNTS+=("$target")
 
     return 0
 }
@@ -180,10 +192,8 @@ bind_chroot_runtime_mount() {
 # ==================================================
 
 prepare_chroot() {
-    local esp_mounted_here=0
-
-    if [[ ! -d "$MNT/etc" ]]; then
-        warn "Target filesystem is not mounted."
+    if [[ -L "$MNT/etc" || ! -d "$MNT/etc" ]]; then
+        warn "Target /etc must be a real directory."
         return 1
     fi
 
@@ -211,76 +221,36 @@ prepare_chroot() {
     if [[ -n "$ESP_DEV" ]] && [[ -n "$ESP_MOUNT" ]]; then
         if (( ! TARGET_ESP_MOUNTED )); then
             mount_esp || return 1
-            esp_mounted_here=1
         fi
     fi
 
     # Prepare DNS first so that the original resolv.conf is backed up
     # before entering the chroot.
     if ! prepare_dns; then
-        if (( esp_mounted_here )) &&
-           [[ -n "$ESP_MOUNT" ]] &&
-           mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
-        fi
-
         return 1
     fi
 
     if ! bind_chroot_runtime_mount /dev "$MNT/dev"; then
         restore_dns || true
         cleanup_chroot_mounts
-
-        if (( esp_mounted_here )) &&
-           [[ -n "$ESP_MOUNT" ]] &&
-           mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
-        fi
-
         return 1
     fi
 
     if ! bind_chroot_runtime_mount /proc "$MNT/proc"; then
         restore_dns || true
         cleanup_chroot_mounts
-
-        if (( esp_mounted_here )) &&
-           [[ -n "$ESP_MOUNT" ]] &&
-           mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
-        fi
-
         return 1
     fi
 
     if ! bind_chroot_runtime_mount /sys "$MNT/sys"; then
         restore_dns || true
         cleanup_chroot_mounts
-
-        if (( esp_mounted_here )) &&
-           [[ -n "$ESP_MOUNT" ]] &&
-           mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
-        fi
-
         return 1
     fi
 
     if ! bind_chroot_runtime_mount /run "$MNT/run"; then
         restore_dns || true
         cleanup_chroot_mounts
-
-        if (( esp_mounted_here )) &&
-           [[ -n "$ESP_MOUNT" ]] &&
-           mountpoint -q "$MNT$ESP_MOUNT"; then
-            umount --recursive "$MNT$ESP_MOUNT" 2>/dev/null || true
-            TARGET_ESP_MOUNTED=0
-        fi
-
         return 1
     fi
 

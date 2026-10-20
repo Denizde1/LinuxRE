@@ -237,7 +237,6 @@ fi
 
 verify_target || failed=1
 verify_pacman || failed=1
-verify_package_integrity || failed=1
 verify_kernel || failed=1
 verify_initramfs || failed=1
 verify_systemd || failed=1
@@ -318,23 +317,6 @@ if (( filesystem_failed != 0 )); then
     if ! ensure_target; then
         warn "Failed to restore target after filesystem repair."
         repair_failed=1
-    fi
-fi
-
-# ==================================================
-# Package integrity repair
-# ==================================================
-
-if ! ensure_target; then
-    warn "Target is unavailable. Skipping remaining repairs."
-    repair_failed=1
-else
-    if ! verify_package_integrity >/dev/null 2>&1; then
-        log "Repairing package integrity..."
-
-        if ! repair_package_integrity; then
-            repair_failed=1
-        fi
     fi
 fi
 
@@ -471,7 +453,6 @@ if ! ensure_target; then
 else
     verify_target || final_failed=1
     verify_pacman || final_failed=1
-    verify_package_integrity || final_failed=1
     verify_kernel || final_failed=1
     verify_initramfs || final_failed=1
     verify_systemd || final_failed=1

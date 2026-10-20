@@ -64,6 +64,7 @@ require_target_commands() {
         mount \
         umount \
         mountpoint \
+        readlink \
         awk \
         sed \
         sort \
@@ -180,6 +181,16 @@ is_mounted_device() {
 
 is_mounted_path() {
     mountpoint -q "$1"
+}
+
+target_path_is_within_root() {
+    local root_path
+    local candidate_path
+
+    root_path="$(readlink -m -- "$1" 2>/dev/null)" || return 1
+    candidate_path="$(readlink -m -- "$2" 2>/dev/null)" || return 1
+
+    [[ "$candidate_path" == "$root_path/"* ]]
 }
 
 track_inspection_mount() {
@@ -630,11 +641,11 @@ looks_like_linux_root() {
         return 1
     fi
 
+    track_inspection_mount "$tmp"
+
     if [[ -f "$tmp/etc/os-release" ]]; then
         result=0
     fi
-
-    track_inspection_mount "$tmp"
 
     if umount "$tmp" 2>/dev/null; then
         untrack_inspection_mount "$tmp"
@@ -794,6 +805,8 @@ detect_btrfs_subvolume() {
         return 1
     fi
 
+    track_inspection_mount "$tmp"
+
     # Root itself is top-level.
     if [[ -f "$tmp/etc/os-release" ]]; then
         ROOT_SUBVOL="5"
@@ -810,8 +823,6 @@ detect_btrfs_subvolume() {
                 sed -n 's/^.* path //p'
         )
     fi
-
-    track_inspection_mount "$tmp"
 
     if umount "$tmp" 2>/dev/null; then
         untrack_inspection_mount "$tmp"
@@ -838,11 +849,46 @@ detect_btrfs_subvolume() {
 # Mount root filesystem
 # ==================================================
 
+mounted_root_matches_selection() {
+    local mounted_source
+    local selected_source
+    local mounted_fstype
+    local mounted_fsroot
+
+    mounted_source="$(findmnt --noheadings --raw --output SOURCE --target "$MNT" 2>/dev/null)" ||
+        return 1
+    mounted_source="${mounted_source%%\[*}"
+    selected_source="$(readlink -f -- "$ROOT_DEV" 2>/dev/null)" || return 1
+    mounted_source="$(readlink -f -- "$mounted_source" 2>/dev/null)" || return 1
+
+    [[ "$mounted_source" == "$selected_source" ]] || return 1
+
+    mounted_fstype="$(findmnt --noheadings --raw --output FSTYPE --target "$MNT" 2>/dev/null)" ||
+        return 1
+    [[ "$mounted_fstype" == "$ROOT_FSTYPE" ]] || return 1
+
+    if [[ "$ROOT_FSTYPE" == "btrfs" ]]; then
+        mounted_fsroot="$(findmnt --noheadings --raw --output FSROOT --target "$MNT" 2>/dev/null)" ||
+            return 1
+        if [[ "$ROOT_SUBVOL" == "5" ]]; then
+            [[ "$mounted_fsroot" == "/" ]] || return 1
+        else
+            [[ "$mounted_fsroot" == "/$ROOT_SUBVOL" ]] || return 1
+        fi
+    fi
+
+    return 0
+}
+
 mount_root() {
 
     mkdir -p "$MNT"
 
     if is_mounted_path "$MNT"; then
+        if ! mounted_root_matches_selection; then
+            warn "A different filesystem or Btrfs subvolume is already mounted at $MNT."
+            return 1
+        fi
         log "Target root is already mounted: $MNT"
         return 0
     fi
@@ -1182,7 +1228,17 @@ mount_esp() {
     local existing_target
     local existing_source
 
+    if [[ -L "$target" ]] || ! target_path_is_within_root "$MNT" "$target"; then
+        warn "Refusing unsafe EFI System Partition mount point: $target"
+        return 1
+    fi
+
     mkdir -p "$target"
+
+    if [[ -L "$target" ]] || ! target_path_is_within_root "$MNT" "$target"; then
+        warn "Refusing unsafe EFI System Partition mount point: $target"
+        return 1
+    fi
 
     # Already mounted at target.
     if is_mounted_path "$target"; then
@@ -1235,13 +1291,17 @@ mount_esp() {
         return 1
     fi
 
+    TARGET_ESP_MOUNTED=1
+
     if ! is_mounted_path "$target"; then
         warn "ESP mount verification failed."
-        umount --recursive "$target" 2>/dev/null || true
+        if umount --recursive "$target" 2>/dev/null; then
+            TARGET_ESP_MOUNTED=0
+        else
+            warn "Failed to clean up the unverified ESP mount."
+        fi
         return 1
     fi
-
-    TARGET_ESP_MOUNTED=1
 
     return 0
 }
@@ -1558,6 +1618,12 @@ prepare_target() {
     # --------------------------------------------------
     # Verify Linux installation
     # --------------------------------------------------
+
+    if [[ -L "$MNT/etc" || ! -d "$MNT/etc" ]]; then
+        warn "Target /etc must be a real directory."
+        cleanup_target_storage
+        return 1
+    fi
 
     if [[ ! -f "$MNT/etc/os-release" ]]; then
         warn "Target does not appear to contain a Linux installation."

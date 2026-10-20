@@ -21,7 +21,10 @@ check_filesystem() {
         return 2
     fi
 
+    require_commands findmnt || return 2
+
     if [[ -z "$fstype" ]]; then
+        require_commands lsblk || return 2
         fstype="$(lsblk -no FSTYPE "$device")"
     fi
 
@@ -96,6 +99,8 @@ repair_filesystem() {
         warn "Invalid block device: $device"
         return 1
     fi
+
+    require_commands findmnt || return 1
 
     if findmnt -S "$device" >/dev/null 2>&1; then
         warn "Filesystem is currently mounted: $device"
