@@ -7,15 +7,29 @@ This project is for those who are as lazy as I am to write commands.
 
 ## Build
 
-Build the ISO from an Arch Linux host with `archiso` installed:
+Build the ISO from an Arch Linux x86_64 host with one command:
 
 ```sh
-sudo pacman -S archiso
-sudo mkarchiso -v -w /tmp/linuxre-work -o /tmp/linuxre-out .
+./build.sh
 ```
 
-The image is written to `/tmp/linuxre-out`. Review the profile and package list
-before building or booting a recovery image.
+The script validates the host, profile, available disk space, and the options
+supported by the installed `mkarchiso`. If `archiso` is missing, it requests
+permission to install only that package with `pacman` (it does not run a full
+system upgrade); `mkarchiso` is run with elevated privileges when needed.
+
+Each run gets a separate directory under `~/linuxre-out/`, outside the source
+profile, so existing ISO files are not overwritten. The ISO, its `.sha256`
+checksum file, and the build log are kept there. Failed builds retain their
+log and work directory for diagnosis; a successful build removes its temporary
+work directory. Set `OUTPUT_DIR` to choose another output location, for example:
+
+```sh
+OUTPUT_DIR="$HOME/LinuxRE images" ./build.sh
+```
+
+Review the profile and package list before building or booting a recovery
+image.
 
 ## Live-environment security
 
