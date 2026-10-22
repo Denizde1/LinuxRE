@@ -7,10 +7,23 @@ PROFILE_DIR="$SCRIPT_DIR"
 OUTPUT_ROOT="${OUTPUT_DIR:-${HOME:-$PROFILE_DIR}/linuxre-out}"
 LOG_FILE=""
 CHECKSUM_TMP=""
+WORK_DIR=""
+ISO_NAME=""
+BUILD_ARCH=""
+BUILD_CACHE_DIRS=()
 
 die() {
     printf 'Error: %s\n' "$*" >&2
     exit 1
+}
+
+report_preserved_artifacts() {
+    if [[ -n "$LOG_FILE" ]]; then
+        printf 'Build log: %s\n' "$LOG_FILE" >&2
+    fi
+    if [[ -n "$WORK_DIR" && -d "$WORK_DIR" ]]; then
+        printf 'Working directory retained for diagnosis: %s\n' "$WORK_DIR" >&2
+    fi
 }
 
 on_error() {
@@ -19,9 +32,7 @@ on_error() {
 
     trap - ERR
     printf 'Build failed at line %s (exit status %s).\n' "$line" "$status" >&2
-    if [[ -n "$LOG_FILE" ]]; then
-        printf 'Build log: %s\n' "$LOG_FILE" >&2
-    fi
+    report_preserved_artifacts
     exit "$status"
 }
 
@@ -30,9 +41,7 @@ on_signal() {
 
     trap - INT TERM HUP
     printf 'Build interrupted (exit status %s).\n' "$status" >&2
-    if [[ -n "$LOG_FILE" ]]; then
-        printf 'Build log: %s\n' "$LOG_FILE" >&2
-    fi
+    report_preserved_artifacts
     exit "$status"
 }
 
@@ -69,25 +78,50 @@ check_host() {
         die "This profile must be built on Arch Linux or an Arch-based system."
     fi
 
-    [[ "$(uname -m)" == x86_64 ]] || die "This profile requires an x86_64 build host."
+    BUILD_ARCH="$(uname -m)"
+    [[ "$BUILD_ARCH" == x86_64 ]] || die "This profile requires an x86_64 build host."
 }
 
 check_profile() {
     local path
+    local profile_iso_name
 
     for path in \
         "$PROFILE_DIR/profiledef.sh" \
         "$PROFILE_DIR/packages.x86_64" \
         "$PROFILE_DIR/pacman.conf" \
-        "$PROFILE_DIR/bootstrap_packages" \
         "$PROFILE_DIR/airootfs" \
         "$PROFILE_DIR/efiboot"; do
         [[ -r "$path" ]] || die "Required profile file or directory is missing or unreadable: $path"
     done
 
-    [[ -s "$PROFILE_DIR/profiledef.sh" ]] || die "profiledef.sh is empty."
-    grep -Eq '^[[:space:]]*buildmodes=.*iso' "$PROFILE_DIR/profiledef.sh" ||
-        die "profiledef.sh does not enable the ISO build mode."
+    [[ -f "$PROFILE_DIR/profiledef.sh" && -s "$PROFILE_DIR/profiledef.sh" ]] ||
+        die "profiledef.sh is missing or empty."
+    [[ -f "$PROFILE_DIR/packages.x86_64" && -s "$PROFILE_DIR/packages.x86_64" ]] ||
+        die "packages.x86_64 is missing or empty."
+    [[ -f "$PROFILE_DIR/pacman.conf" ]] || die "pacman.conf is missing."
+    [[ -d "$PROFILE_DIR/airootfs" && -d "$PROFILE_DIR/efiboot" ]] ||
+        die "airootfs and efiboot must be profile directories."
+
+    if ! profile_iso_name="$(
+        bash -Eeuo pipefail -c '
+            declare -A file_permissions=()
+            source "$1"
+            [[ " ${buildmodes[*]-} " == *" iso "* ]]
+            [[ " ${bootmodes[*]-} " == *" uefi.systemd-boot "* ]]
+            [[ -n "${iso_name:-}" ]]
+            printf "%s\n" "$iso_name"
+        ' bash "$PROFILE_DIR/profiledef.sh" 2>/dev/null
+    )"; then
+        die "profiledef.sh must be valid Bash and enable the ISO and uefi.systemd-boot modes."
+    fi
+    ISO_NAME="$profile_iso_name"
+
+    [[ -r "$PROFILE_DIR/efiboot/loader/loader.conf" ]] ||
+        die "The uefi.systemd-boot profile requires efiboot/loader/loader.conf."
+    [[ -n "$(find "$PROFILE_DIR/efiboot/loader/entries" -maxdepth 1 -type f -name '*.conf' -print -quit 2>/dev/null)" ]] ||
+        die "The uefi.systemd-boot profile requires at least one efiboot loader entry."
+
     [[ -s "$PROFILE_DIR/packages.x86_64" ]] || die "packages.x86_64 is empty."
     awk 'NF && $1 !~ /^#/ { found=1 } END { exit !found }' "$PROFILE_DIR/packages.x86_64" ||
         die "packages.x86_64 does not contain any package names."
@@ -134,46 +168,83 @@ ensure_archiso() {
 
 get_mkarchiso_options() {
     local help_output
+    local option
 
     if ! help_output="$(mkarchiso -h 2>&1)"; then
         die "Could not read mkarchiso help to verify supported build options."
     fi
 
     for option in '-v' '-w' '-o'; do
-        grep -Eq "^[[:space:]]*${option//-/\\-}([[:space:]]|$)" <<< "$help_output" ||
+        awk -v option="$option" '$1 == option { found=1 } END { exit !found }' <<< "$help_output" ||
             die "Installed mkarchiso does not support the required $option option."
     done
+}
 
-    if grep -Eq '^[[:space:]]*-r([[:space:]]|$)' <<< "$help_output"; then
-        CLEAN_WORK_OPTION=(-r)
+get_build_cache_dirs() {
+    local system_cache_dirs
+    local profile_cache_dirs
+    local selected_cache_dirs
+
+    system_cache_dirs="$(pacman-conf CacheDir | tr '\n' ' ')" ||
+        die "Could not read the system pacman CacheDir."
+    profile_cache_dirs="$(pacman-conf --config "$PROFILE_DIR/pacman.conf" CacheDir | tr '\n' ' ')" ||
+        die "Could not read the profile pacman CacheDir."
+
+    if [[ "$profile_cache_dirs" != "/var/cache/pacman/pkg" &&
+          "$system_cache_dirs" != "$profile_cache_dirs" ]]; then
+        selected_cache_dirs="$profile_cache_dirs"
     else
-        CLEAN_WORK_OPTION=()
-        printf 'Note: this mkarchiso version has no -r option; its work directory will be kept.\n'
+        selected_cache_dirs="$system_cache_dirs"
+    fi
+    read -r -a BUILD_CACHE_DIRS <<< "$selected_cache_dirs"
+    ((${#BUILD_CACHE_DIRS[@]} > 0)) || die "No pacman package cache directory was configured."
+}
+
+check_free_space_at() {
+    local path="$1"
+    local existing_path="$path"
+    local available_kib
+    local minimum_kib="$2"
+
+    while [[ ! -d "$existing_path" && "$existing_path" != / ]]; do
+        existing_path="${existing_path%/*}"
+        [[ -n "$existing_path" ]] || existing_path=/
+    done
+    [[ -d "$existing_path" ]] || die "Could not find a filesystem for $path."
+
+    available_kib="$(df -Pk -- "$existing_path" | awk 'END { print $4 }')"
+    [[ "$available_kib" =~ ^[0-9]+$ ]] || die "Could not determine free space for $path."
+    if (( available_kib < minimum_kib )); then
+        die "At least ${MIN_BUILD_GIB} GiB of free space is required for the build; only $((available_kib / 1024 / 1024)) GiB is available on the filesystem containing $path."
     fi
 }
 
 check_disk_space() {
-    local available_kib
-    local minimum_kib=$((12 * 1024 * 1024))
+    local minimum_gib="${MIN_BUILD_GIB:-20}"
+    local minimum_kib
+    local cache_dir
 
-    available_kib="$(df -Pk -- "$OUTPUT_ROOT" | awk 'END { print $4 }')"
-    [[ "$available_kib" =~ ^[0-9]+$ ]] || die "Could not determine free space for $OUTPUT_ROOT."
-    if (( available_kib < minimum_kib )); then
-        die "At least 12 GiB of free space is required on the output filesystem; only $((available_kib / 1024 / 1024)) GiB is available at $OUTPUT_ROOT."
-    fi
+    [[ "$minimum_gib" =~ ^[1-9][0-9]{0,5}$ ]] ||
+        die "MIN_BUILD_GIB must be a positive integer no greater than 999999."
+    minimum_kib=$((10#$minimum_gib * 1024 * 1024))
+    MIN_BUILD_GIB="$minimum_gib"
+
+    check_free_space_at "$OUTPUT_ROOT" "$minimum_kib"
+    for cache_dir in "${BUILD_CACHE_DIRS[@]}"; do
+        check_free_space_at "$cache_dir" "$minimum_kib"
+    done
 }
 
 main() {
-    local required_tools=(awk df file find grep mktemp mv pacman rm sha256sum stat tee uname)
+    local required_tools=(awk bash chmod df file find grep mktemp mv pacman pacman-conf rm sha256sum stat tee tr uname)
     local tool
     local run_dir
-    local work_dir
     local iso_file
     local file_type
     local checksum_file
     local iso_size
+    local build_status
     local available_options=()
-    local -a CLEAN_WORK_OPTION=()
     local -a iso_files=()
 
     (($# == 0)) || die "Usage: $0"
@@ -187,9 +258,10 @@ main() {
 
     mkdir -p -- "$OUTPUT_ROOT"
     OUTPUT_ROOT="$(cd -- "$OUTPUT_ROOT" && pwd -P)"
-    check_disk_space
     ensure_archiso
     get_mkarchiso_options
+    get_build_cache_dirs
+    check_disk_space
 
     if (( EUID != 0 )); then
         require_command sudo
@@ -199,24 +271,33 @@ main() {
     run_dir="$(mktemp -d -- "$OUTPUT_ROOT/linuxre-build.XXXXXXXX")"
     LOG_FILE="$run_dir/build.log"
     : > "$LOG_FILE"
-    work_dir="$(mktemp -d -- "$OUTPUT_ROOT/.linuxre-work.XXXXXXXX")"
+    WORK_DIR="$(mktemp -d -- "$OUTPUT_ROOT/.linuxre-work.XXXXXXXX")"
 
-    available_options=(-v -w "$work_dir" -o "$run_dir")
+    available_options=(-v -w "$WORK_DIR" -o "$run_dir")
     printf 'Building profile %s\nOutput directory: %s\n' "$PROFILE_DIR" "$run_dir"
     printf 'Command: mkarchiso'
-    printf ' %q' "${available_options[@]}" "${CLEAN_WORK_OPTION[@]}" "$PROFILE_DIR"
+    printf ' %q' "${available_options[@]}" "$PROFILE_DIR"
     printf '\nBuild log: %s\n' "$LOG_FILE"
 
-    run_privileged mkarchiso \
+    if run_privileged mkarchiso \
         "${available_options[@]}" \
-        "${CLEAN_WORK_OPTION[@]}" \
-        "$PROFILE_DIR" 2>&1 | tee -a "$LOG_FILE"
+        "$PROFILE_DIR" 2>&1 | tee -a "$LOG_FILE"; then
+        :
+    else
+        build_status=$?
+        printf 'mkarchiso failed (exit status %s).\n' "$build_status" >&2
+        report_preserved_artifacts
+        exit "$build_status"
+    fi
 
     mapfile -d '' -t iso_files < <(find "$run_dir" -maxdepth 1 -type f -name '*.iso' -print0)
     ((${#iso_files[@]} == 1)) ||
         die "Expected exactly one ISO in $run_dir, found ${#iso_files[@]}. See the build log."
 
     iso_file="${iso_files[0]}"
+    [[ "${iso_file##*/}" == "$ISO_NAME"-*-"$BUILD_ARCH".iso ]] ||
+        die "Unexpected ISO filename: ${iso_file##*/} (expected $ISO_NAME-<version>-$BUILD_ARCH.iso)."
+    run_privileged chmod a+r -- "$iso_file"
     [[ -s "$iso_file" && -r "$iso_file" ]] ||
         die "The generated ISO is empty or unreadable: $iso_file"
     file_type="$(file --brief -- "$iso_file")"
@@ -231,13 +312,14 @@ main() {
     sha256sum --check "$checksum_file"
 
     iso_size="$(stat -c '%s' -- "$iso_file")"
-    case "$work_dir" in
+    case "$WORK_DIR" in
         "$OUTPUT_ROOT"/.linuxre-work.*) ;;
-        *) die "Refusing to remove an unexpected work directory: $work_dir" ;;
+        *) die "Refusing to remove an unexpected work directory: $WORK_DIR" ;;
     esac
-    if ! run_privileged rm -rf -- "$work_dir"; then
-        printf 'Warning: could not remove temporary work directory: %s\n' "$work_dir" >&2
+    if ! run_privileged rm -rf -- "$WORK_DIR"; then
+        printf 'Warning: could not remove temporary work directory: %s\n' "$WORK_DIR" >&2
     fi
+    WORK_DIR=""
 
     printf '\nISO: %s\nSize: %s bytes\nSHA-256 file: %s\n' \
         "$iso_file" "$iso_size" "$checksum_file"

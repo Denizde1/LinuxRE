@@ -21,11 +21,14 @@ system upgrade); `mkarchiso` is run with elevated privileges when needed.
 Each run gets a separate directory under `~/linuxre-out/`, outside the source
 profile, so existing ISO files are not overwritten. The ISO, its `.sha256`
 checksum file, and the build log are kept there. Failed builds retain their
-log and work directory for diagnosis; a successful build removes its temporary
-work directory. Set `OUTPUT_DIR` to choose another output location, for example:
+log and work directory for diagnosis; their paths are printed on failure, and a
+successful build removes its temporary work directory. By default the script
+requires 20 GiB free on both the output and effective pacman cache filesystems.
+Set `MIN_BUILD_GIB` to change this estimate and `OUTPUT_DIR` to choose another
+output location, for example:
 
 ```sh
-OUTPUT_DIR="$HOME/LinuxRE images" ./build.sh
+MIN_BUILD_GIB=24 OUTPUT_DIR="$HOME/LinuxRE images" ./build.sh
 ```
 
 Review the profile and package list before building or booting a recovery
