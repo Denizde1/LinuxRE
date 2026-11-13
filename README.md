@@ -42,7 +42,7 @@ and do not expose it to untrusted users or networks. Password-based SSH login
 is disabled; key-based SSH can be used if an operator explicitly enables the
 SSH service.
 
-## Latest Version: v0.9-rc1
+## Latest Version: v1.0
 
 
 ## LinuxRE Discord (I don't recommend to join lol)
